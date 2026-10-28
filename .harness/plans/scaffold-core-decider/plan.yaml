@@ -1,0 +1,289 @@
+id: scaffold-core-decider
+goal: >
+  Soriseom 솔루션 뼈대(Core, WinUI 3 App, Core 테스트 프로젝트와 공통 빌드·스타일·패키지 설정)를 만들고,
+  Core에 설정 모델과 팝업 결정기(곡 변경 판단, 브라우저 갱신 대기, 표시 중 교체, 시작 시·일시정지·반복 처리,
+  꺼진 앱·전체화면 제외)를 단위 테스트와 함께 구현한다. 완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트,
+  포맷 검사)와 로컬 MSIX 생성이 모두 통과하고, docs/PRD.md 1·3·4절의 Core 규칙이 테스트로 검증된 상태다.
+  GSMTC 어댑터, 팝업 창, 설정 창, 트레이, 자동 실행, CI 워크플로, 방해 금지 감지는 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-core-scaffold
+    title: add solution scaffold and core settings model
+    type: feat
+    scope: core
+    description: |
+      먼저 읽을 파일: CLAUDE.md(전체, 특히 "명령어", "C# 규칙", "테스트"), docs/ARCHITECTURE.md("디렉토리 구조",
+      "레이어 규칙", "횡단 관심사"의 품질 게이트), docs/ADR.md("원칙"의 패키지 목록, ADR-004, ADR-006),
+      docs/PRD.md("4. 설정 창" 표).
+
+      저장소에는 아직 코드가 없다. 이 스텝은 솔루션 뼈대와 Core·테스트 프로젝트를 만들고, Core에 첫 판단 로직인
+      설정 모델을 넣는다. WinUI App 프로젝트(src/Soriseom.App)는 만들지 마라. 이유: 다음 스텝 s2에서 Visual Studio
+      템플릿으로 만든다.
+
+      ## 1. 루트 파일
+      - `global.json`: 내용은 정확히 `{"test": {"runner": "Microsoft.Testing.Platform"}}`. SDK 버전은 고정하지 않는다.
+        이유: xUnit v3를 `dotnet test`에서 Microsoft Testing Platform으로 돌리기 위해서다.
+      - `Directory.Build.props`: 모든 프로젝트 공통 설정. `Nullable`=enable, `ImplicitUsings`=enable,
+        `TreatWarningsAsErrors`=true, `WarningsNotAsErrors`에 `NU1901;NU1902;NU1903;NU1904`(기존 값 유지),
+        `EnforceCodeStyleInBuild`=true, `GenerateDocumentationFile`=true, `NoWarn`에 `CS1591` 추가(`$(NoWarn)` 유지),
+        그리고 `<AdditionalFiles Include="$(MSBuildThisFileDirectory)stylecop.json" Link="stylecop.json" />`.
+        `LangVersion`은 넣지 않는다(SDK 기본 C# 14).
+      - `Directory.Packages.props`: `ManagePackageVersionsCentrally`=true.
+        `<GlobalPackageReference Include="StyleCop.Analyzers" Version="1.3.151-beta" />`로 분석기를 모든 프로젝트에
+        적용한다. 이유: 개별 csproj에 분석기 참조를 중복하지 않는다. 1.2.x는 C# 14 문법에서 오탐을 내서 쓰지 않는다(ADR-006).
+        `PackageVersion`: xunit.v3 4.0.2, xunit.runner.visualstudio 4.0.1, Microsoft.NET.Test.Sdk 18.11.0.
+        이 버전들은 2026-10-29에 빌드를 확인했고 로컬 NuGet 캐시에 있다. 다른 패키지(CommunityToolkit.Mvvm,
+        H.NotifyIcon.WinUI 등)는 넣지 마라. 이유: 이 계획에서 쓰지 않는다.
+      - `stylecop.json`: `settings.orderingRules.usingDirectivesPlacement`를 `"outsideNamespace"`로. 그 밖의 설정은 넣지 않는다.
+      - `.editorconfig`: `root = true`, 그리고 `[*.cs]` 절에 아래 규칙만 둔다. 각 묶음 위에 영어 주석으로 이유를 한 줄 적는다.
+        심각도는 `dotnet_diagnostic.<ID>.severity = warning`으로 주고, 옵션 값 뒤에 `:warning`을 붙이지 않는다.
+        - using/namespace: `csharp_using_directive_placement = outside_namespace`,
+          `csharp_style_namespace_declarations = file_scoped`, `dotnet_sort_system_directives_first = true`,
+          IDE0065·IDE0161·IDE0005(불필요한 using)를 warning.
+        - `this.` 금지: `dotnet_style_qualification_for_field`, `_property`, `_method`, `_event`를 모두 `false`, IDE0003을 warning.
+        - private 필드 `_camelCase`: 네이밍 규칙 두 개. (a) private const 필드(`required_modifiers = const`)는 `pascal_case`,
+          (b) 그 밖의 private 필드(static readonly 포함)는 `required_prefix = _`, `capitalization = camel_case`.
+          두 규칙 모두 `.severity = warning`이고, 별도로 `dotnet_diagnostic.IDE1006.severity = warning`도 둔다.
+        - StyleCop 조정(ADR-006): SA1101, SA1309, SA1633, SA1600, SA1601, SA1602를 `none`으로 끄고 각각 사유 주석을 단다.
+        - 이 밖의 규칙은 켜거나 끄지 마라. 이유: 규칙 조정은 계획에 명시된 것만 한다(ADR-006).
+        2026-10-29 임시 프로젝트로 확인한 동작: IDE0005, IDE0065, IDE0161, IDE1006은 빌드에서 잡힌다. IDE1006은
+        `dotnet_diagnostic.IDE1006.severity`가 있어야 빌드에서 잡힌다. IDE0003은 빌드에서는 안 잡히고
+        `dotnet format --verify-no-changes`에서 잡힌다. `private static readonly TimeSpan _delay` 같은 이름은
+        StyleCop 1.3과 충돌하지 않는다.
+      - `Soriseom.slnx`: `<Configurations>` 안에 `<Platform Name="x64" />`, `<Platform Name="ARM64" />`, `<Platform Name="x86" />`를
+        두고, `/src/` 폴더에 Core 프로젝트, `/tests/` 폴더에 테스트 프로젝트를 넣는다. 이 두 프로젝트에는 플랫폼 매핑을
+        넣지 않는다. 이유: CLAUDE.md의 빌드 명령이 `-p:Platform=x64`를 쓰므로 솔루션에 x64 플랫폼이 있어야 한다(없으면 MSB4126).
+
+      ## 2. 프로젝트
+      - `src/Soriseom.Core/Soriseom.Core.csproj`: `TargetFramework` net10.0만 둔다. Directory.Build.props에 있는 설정을
+        반복하지 마라. `Windows.*`, `Microsoft.UI.*`를 참조하지 마라(ADR-004).
+      - `tests/Soriseom.Core.Tests/Soriseom.Core.Tests.csproj`: net10.0, `IsPackable`=false, 버전 없는
+        `PackageReference` 세 개(xunit.v3, xunit.runner.visualstudio, Microsoft.NET.Test.Sdk), Core `ProjectReference`.
+        세 패키지를 모두 둔다. 이유: 뒤의 두 개를 빼면 `OutputType=Exe`를 직접 지정해야 한다.
+
+      ## 3. 설정 모델 (namespace `Soriseom.Core`, 파일은 `src/Soriseom.Core/` 바로 아래, 파일 하나에 타입 하나)
+      - `PopupPosition.cs`: `public enum PopupPosition { TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight }`
+      - `AppLanguage.cs`: `public enum AppLanguage { System, Korean, English }`
+      - `AppSettings.cs`: `public sealed record AppSettings`. 불변이고 속성은 `init`이다. PRD 4절의 기본값과 범위를 담는다.
+        - `public const int MinDisplaySeconds = 2;`, `MaxDisplaySeconds = 10;`, `DefaultDisplaySeconds = 4;`
+        - `int DisplaySeconds` 기본 4. 범위 밖 값은 예외 없이 2~10으로 잘라서(clamp) 저장한다. 이유: 이후 App이
+          LocalSettings에서 읽은 값이 손상돼 있어도 앱이 죽으면 안 된다. C# 14 `field` 키워드를 쓰는 init 접근자를 쓰면 된다.
+        - `PopupPosition Position` 기본 TopCenter, `bool HideWhenFullscreen` 기본 true, `AppLanguage Language` 기본 System,
+          `bool LaunchAtStartup` 기본 true.
+        - `ImmutableDictionary<string, bool> Apps` 기본 빈 사전. 키는 앱 ID(GSMTC의 SourceAppUserModelId), 값은 켜짐 여부.
+          키 비교는 ordinal(기본 비교자).
+        - `public bool IsAppEnabled(string appId)`: 목록에 없으면 true, 있으면 그 값. 이유: 처음 보는 앱은 켜진 상태다(PRD 3).
+        - `public AppSettings WithAppSeen(string appId)`: 목록에 없으면 켜짐(true)으로 추가한 새 설정을 돌려주고, 이미 있으면
+          값을 바꾸지 않고 그대로 돌려준다. 이유: 사용자가 끈 앱이 다시 감지돼도 켜지면 안 된다.
+        - 이 밖의 메서드나 속성(표시 시간 TimeSpan 변환, 직렬화 등)은 넣지 마라. 이유: 쓰는 곳이 아직 없다.
+
+      ## 4. 테스트 `tests/Soriseom.Core.Tests/AppSettingsTests.cs` (namespace `Soriseom.Core.Tests`, class `AppSettingsTests`)
+      각각 검증한다: 모든 기본값; DisplaySeconds의 경계와 범위 밖 값(예: 0→2, 1→2, 2→2, 10→10, 11→10, `with`로 바꿀 때도 적용);
+      IsAppEnabled가 모르는 앱에 true, 끈 앱에 false; WithAppSeen이 새 앱을 true로 추가하고, 끈 앱을 다시 보아도 false를 유지.
+
+      검증하려고 만든 임시 코드나 파일은 끝나기 전에 지운다.
+    expected_files:
+      - global.json
+      - Directory.Build.props
+      - Directory.Packages.props
+      - .editorconfig
+      - stylecop.json
+      - Soriseom.slnx
+      - src/Soriseom.Core/*
+      - tests/Soriseom.Core.Tests/*
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-class "Soriseom.Core.Tests.AppSettingsTests"'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s2-winui-app
+    title: add packaged winui app project
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "주의", "구조 규칙", "언어"), docs/ARCHITECTURE.md("디렉토리 구조",
+      "레이어 규칙", "횡단 관심사"의 현지화), docs/ADR.md(ADR-002, ADR-003), 그리고 s1이 만든 `Soriseom.slnx`,
+      `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig`.
+
+      `src/Soriseom.App/`에 WinUI 3 단일 프로젝트 MSIX 앱을 만든다. `dotnet new`용 WinUI 3 템플릿은 없으므로 Visual Studio
+      템플릿 파일을 복사해 매개변수를 직접 치환한다. 템플릿 폴더:
+      `C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\Extensions\3e4om1hv.vpr\ProjectTemplates\CSharp\1033\WinUI.Desktop.Cs.SingleProjectPackagedApp\`
+      그 폴더의 `.vstemplate`에 있는 `ProjectItem` 매핑대로 복사한다: `ProjectTemplate.csproj` → `Soriseom.App.csproj`,
+      `Package-managed.appxmanifest` → `Package.appxmanifest`, `app.manifest`, `App.xaml`, `App.xaml.cs`, `MainWindow.xaml`,
+      `MainWindow.xaml.cs`, `Properties/launchSettings.json`, `Properties/PublishProfiles/win-x64.pubxml`(arm64, x86도),
+      `Assets/` 아래 PNG 7개. 템플릿 미리보기용 `.ico`, `.png`와 `.vstemplate`는 복사하지 않는다.
+
+      ## 치환과 수정
+      - `$safeprojectname$`, `$projectname$` → `Soriseom.App` (manifest의 표시 이름은 아래 리소스 참조로 바꾼다).
+      - csproj: `TargetFramework`를 `net10.0-windows10.0.26100.0`으로 바꾸고, `TargetPlatformMinVersion` 10.0.17763.0은 유지한다.
+        `<Nullable>`은 지운다. 이유: Directory.Build.props에 있고, 같은 설정을 csproj에 중복하지 않는다. 나머지(Platforms,
+        RuntimeIdentifiers, PublishProfile, UseWinUI, WinUISDKReferences, EnableMsixTooling, Msix ProjectCapability,
+        HasPackageAndPublishMenu, Publish 속성)는 그대로 둔다. `PublishTrimmed`, `PublishReadyToRun`을 고치지 마라.
+        이유: Release 빌드 문제(IL2104)는 이 계획 밖이며 docs/ARCHITECTURE.md "구현 전에 확인할 것"에서 따로 정한다.
+      - 패키지: `dotnet add src/Soriseom.App package Microsoft.WindowsAppSDK --version 2.6.4`,
+        `dotnet add src/Soriseom.App package Microsoft.Windows.SDK.BuildTools --version 10.0.28000.2705`. 버전은
+        Directory.Packages.props에 들어가고 csproj에는 버전 없는 참조만 남아야 한다. 템플릿의 `$WindowsAppSDKNupkgVersion$`
+        값(2.0.x)은 쓰지 마라. 이 두 버전은 2026-10-29에 빌드를 확인했고 로컬 NuGet 캐시에 있다.
+      - csproj에 `<ProjectReference Include="..\Soriseom.Core\Soriseom.Core.csproj" />`를 추가한다. 이유: App → Core 의존 방향
+        (ARCHITECTURE "레이어 규칙")을 지금 확정하고, x64 WinUI 프로젝트가 net10.0 Core를 참조해 빌드되는지 확인한다.
+        Core 타입은 아직 쓰지 않는다.
+      - `Package.appxmanifest`:
+        - `$targetnametoken$`, `$targetentrypoint$`는 빌드할 때 치환되므로 그대로 둔다.
+        - `<systemai:Capability Name="systemAIModels"/>`와 `xmlns:systemai` 선언을 지운다. `IgnorableNamespaces` 속성은 남기고
+          값에서 `systemai`만 빼 `"uap rescap"`으로 만든다. 이 속성 줄을 통째로 지우면 XML이 깨지고, dotnet build가 원인 대신
+          엉뚱한 `System.Security.Permissions` MSB4018 오류를 낸다. 이유: 이 앱은 시스템 AI 모델을 쓰지 않는다.
+        - `Identity`: `Name="Soriseom.Dev"`, `Publisher="CN=LOONACIA"`, `Version="1.0.0.0"`. 임시 패키지 ID다(ADR-003:
+          Partner Center에서 이름을 예약한 뒤 그 값으로 바꾼다).
+        - `mp:PhoneIdentity`의 `PhoneProductId`는 새로 만든 GUID 하나로 바꾼다.
+        - `PublisherDisplayName`은 `LOONACIA`.
+        - `Properties/DisplayName`과 `uap:VisualElements`의 `DisplayName`은 `ms-resource:AppDisplayName`,
+          `uap:VisualElements`의 `Description`은 `ms-resource:AppDescription`.
+        - `runFullTrust`는 남기고 다른 capability를 추가하지 마라.
+      - 리소스 `src/Soriseom.App/Strings/en-US/Resources.resw`, `src/Soriseom.App/Strings/ko-KR/Resources.resw`: 표준 resw 스키마
+        (resheader 포함)에 키 두 개를 둔다. `AppDisplayName`: en-US `Soriseom`, ko-KR `소리섬`. `AppDescription`: en-US
+        `Briefly shows what's playing when the track changes.`, ko-KR `곡이 바뀔 때 지금 재생 중인 음악을 잠깐 보여줍니다.`
+        이유: 사용자에게 보이는 문자열은 en-US·ko-KR resw에 둔다(CLAUDE.md "언어"). Store 이름도 두 언어로 예약한다.
+      - `Properties/launchSettings.json`: `(Unpackaged)` 프로필을 지우고 패키지 프로필만 남긴다. 이유: unpackaged 실행은
+        지원하지 않는다(ADR-003).
+      - `MainWindow.xaml`: `Title` 속성을 지운다. 이유: 하드코딩한 사용자 표시 문자열을 두지 않는다. 창 내용(MicaBackdrop,
+        빈 Grid)은 그대로 둔다. 설정 창과 팝업 창은 이후 계획에서 만든다.
+      - `App.xaml.cs`, `MainWindow.xaml.cs`: ImplicitUsings 때문에 필요 없어졌거나 쓰지 않는 using과 템플릿 안내 주석
+        (`// To learn more about WinUI...`)을 지운다. 동작은 바꾸지 않는다. 템플릿 코드는 포맷 검사와 StyleCop에 걸리므로
+        `dotnet format Soriseom.slnx`를 먼저 실행하고, 자동으로 안 고쳐지는 위반만 직접 고친다.
+      - `Soriseom.slnx`: `/src/` 폴더에 App 프로젝트를 추가하고, 그 `<Project>` 안에 `<Platform Solution="*|x64" Project="x64" />`,
+        `<Platform Solution="*|ARM64" Project="ARM64" />`, `<Platform Solution="*|x86" Project="x86" />`와 `<Deploy />`를 넣는다.
+        이 매핑이 없으면 `-p:Platform=x64` 빌드가 MSB4126으로 실패한다. Core와 테스트 프로젝트에는 매핑을 넣지 않는다.
+
+      ## 하지 말 것
+      - 앱을 실행하지 마라(`dotnet run`, 빌드된 exe 실행, 패키지 등록·설치 포함). 이유: 트레이 상주 GUI라 스스로 끝나지
+        않고, 패키지 앱이라 실행하면 개발용 패키지가 시스템에 등록된다. 검증은 AC의 빌드와 MSIX 생성으로만 한다.
+      - CommunityToolkit.Mvvm, H.NotifyIcon.WinUI를 추가하지 마라. 이유: 이 계획에서 쓰지 않는다.
+      - Assets PNG를 새로 그리거나 바꾸지 마라. 이유: 앱 아이콘은 별도 작업이다.
+      - Core와 테스트 프로젝트를 고치지 마라.
+      MSIX 생성 AC는 `src/Soriseom.App/AppPackages/`에 산출물을 만들며 이 경로는 `.gitignore`에 이미 있다.
+    expected_files:
+      - src/Soriseom.App/*
+      - Soriseom.slnx
+      - Directory.Packages.props
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s3-track-change-decider
+    title: decide popups on settled track changes
+    type: feat
+    scope: core
+    description: |
+      먼저 읽을 파일: docs/PRD.md("1. 곡 변경 팝업", "범위 밖"의 트리거 항목), docs/ARCHITECTURE.md("레이어 규칙",
+      "데이터 흐름"), s1이 만든 `src/Soriseom.Core/AppSettings.cs`, `tests/Soriseom.Core.Tests/AppSettingsTests.cs`(테스트 스타일).
+
+      Core에 팝업 결정기를 추가한다. 이후 계획에서 App은 GSMTC 이벤트가 올 때마다, 그리고 결정기가 돌려준 재평가 시각에
+      타이머가 울릴 때마다 현재 스냅샷으로 `Decide`를 부르고 결과대로 팝업을 띄우거나 교체한다. 결정기는 타이머, 스레드,
+      `DateTime.Now`/`DateTimeOffset.Now`를 쓰지 않는다. 현재 시각은 `now` 인자로만 받고, 기다려야 하면 다시 평가할 시각을
+      결과로 돌려준다(ARCHITECTURE "레이어 규칙").
+
+      ## 타입 (namespace `Soriseom.Core`, `src/Soriseom.Core/` 바로 아래, 파일 하나에 타입 하나)
+      - `MediaSnapshot.cs`: `public sealed record MediaSnapshot(string AppId, string Title, string Artist, bool IsPlaying);`
+        AppId에는 GSMTC의 SourceAppUserModelId가 들어간다.
+      - `PopupAction.cs`: `public enum PopupAction { None, Show, Replace }`
+      - `PopupDecision.cs`: `public sealed record PopupDecision(PopupAction Action, MediaSnapshot? Track, DateTimeOffset? ReevaluateAt);`
+        Action이 Show/Replace이면 Track은 표시할 스냅샷이고 ReevaluateAt은 null이다. Action이 None이면 Track은 null이고,
+        ReevaluateAt이 있으면 App이 그 시각에 `Decide`를 다시 불러야 한다.
+      - `PopupDecider.cs`: `public sealed class PopupDecider`. 호출 사이의 상태를 private 필드로 가진다.
+        `public static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(500);`
+        `public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, DateTimeOffset now)`
+
+      ## 규칙 (위에서부터 판단)
+      1. 첫 호출: App이 시작할 때 한 번 부른다. 받은 스냅샷(null 가능)을 "마지막으로 본 스냅샷"으로 기록하고, 제목이 있으면
+         그 곡(제목, 아티스트)을 "처리한 곡"으로 기록한 뒤 `None`(ReevaluateAt 없음)을 돌려준다. 이유: 앱 시작 시 표시는
+         범위 밖이다(PRD "범위 밖").
+      2. 변경 감지: 스냅샷이 마지막으로 본 스냅샷과 다르면(레코드 값 비교, null 포함) 그 스냅샷과 `now`를 기록하고 `None`,
+         `ReevaluateAt = now + SettleDelay`를 돌려준다. 기다리는 중에 또 바뀌면 대기를 처음부터 다시 센다. 이유: 브라우저는
+         곡 정보를 나눠서 갱신하므로 중간 상태로 팝업이 두 번 뜨면 안 된다(PRD 1).
+      3. 대기 중: 스냅샷은 같지만 `now`가 마지막 변경 시각 + SettleDelay보다 이르면 `None`, `ReevaluateAt = 마지막 변경 시각 + SettleDelay`.
+         (App 타이머가 일찍 울렸거나 같은 내용의 이벤트가 또 온 경우)
+      4. 안정된 뒤 판단:
+         - 스냅샷이 null이거나 `IsPlaying`이 false면 `None`. 처리한 곡은 바꾸지 않는다. 이유: 일시정지 중 바뀐 곡은 띄우지
+           않고, 그 곡이 재생을 시작할 때 띄운다(PRD 1).
+         - 제목이 비었거나 공백뿐이면 `None`. 처리한 곡은 바꾸지 않는다.
+         - (제목, 아티스트)가 처리한 곡과 같으면 `None`. AppId와 IsPlaying은 비교하지 않고, 문자열은 ordinal로 비교한다.
+           이유: 반복 재생과 재생 재개는 트리거가 아니다(PRD 1, "범위 밖").
+         - 그 밖에는 이 곡을 처리한 곡으로 기록한다. 직전 Show/Replace가 정한 표시 종료 시각보다 `now`가 이르면 `Replace`,
+           아니면(같은 시각 포함) `Show`를 돌려주고 Track은 현재 스냅샷이다. 표시 종료 시각은 `now + settings.DisplaySeconds`초로
+           새로 잡는다. 이유: 표시 중에 곡이 또 바뀌면 내용을 바꾸고 표시 시간을 처음부터 다시 센다(PRD 1).
+
+      앱별 끄기, 전체화면, 방해 금지 판단은 넣지 마라. 이유: 표시 제외 규칙은 s4에서 `Decide`에 인자를 추가하며 구현한다.
+      `AppSettings`는 고치지 마라.
+
+      ## 테스트 `tests/Soriseom.Core.Tests/PopupDeciderTests.cs` (class `PopupDeciderTests`)
+      고정된 기준 시각(예: `new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)`)에 `PopupDecider.SettleDelay`와 초 단위를
+      더해 시각을 만든다. 실제 시간, `Task.Delay`, `Thread.Sleep`을 쓰지 마라. 다음을 각각 검증한다:
+      - 첫 호출의 재생 중인 곡은 None이고 ReevaluateAt도 없다. 그 곡을 다시 받아도 None.
+      - 재생 중 곡이 바뀌면 None과 `ReevaluateAt == now + SettleDelay`, 그 시각에 같은 스냅샷으로 부르면 Show와 그 스냅샷.
+      - 대기 중 제목만 바뀐 상태에서 아티스트까지 바뀐 상태로 이어지면, 첫 변경 기준의 이른 재평가는 None과 남은 대기 시각이고,
+        Show는 마지막 값으로 한 번만 나온다(그 뒤 같은 스냅샷은 None).
+      - 표시 시간 안에 다음 곡이 안정되면 Replace, 표시 시간이 지난 뒤면 Show. DisplaySeconds를 바꾼 설정으로도 한 번 확인한다.
+      - 같은 제목·아티스트가 AppId나 재생 상태만 바뀌어 다시 오면 None.
+      - 일시정지 중 바뀐 곡은 None, 그 곡이 재생을 시작해 안정되면 Show.
+      - 일시정지 후 같은 곡을 재개하면 None.
+      - 세션이 사라지면(null) None, 같은 곡으로 다시 나타나면 None, 다른 곡으로 나타나면 Show.
+      - 제목이 빈 문자열이나 공백이면 None, 그 뒤 정상 곡은 Show.
+    expected_files:
+      - src/Soriseom.Core/MediaSnapshot.cs
+      - src/Soriseom.Core/PopupAction.cs
+      - src/Soriseom.Core/PopupDecision.cs
+      - src/Soriseom.Core/PopupDecider.cs
+      - tests/Soriseom.Core.Tests/PopupDeciderTests.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-class "Soriseom.Core.Tests.PopupDeciderTests"'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s4-suppression-rules
+    title: suppress popups for disabled apps and fullscreen
+    type: feat
+    scope: core
+    description: |
+      먼저 읽을 파일: docs/PRD.md("3. 표시하지 않는 경우", "4. 설정 창", "범위 밖"), docs/ARCHITECTURE.md("데이터 흐름",
+      "구현 전에 확인할 것"), `src/Soriseom.Core/PopupDecider.cs`, `src/Soriseom.Core/AppSettings.cs`,
+      `tests/Soriseom.Core.Tests/PopupDeciderTests.cs`.
+
+      `PopupDecider.Decide`의 시그니처를
+      `public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, bool isFullscreen, DateTimeOffset now)`로 바꾸고
+      표시 제외 규칙을 추가한다. 이후 계획에서 App은 `SHQueryUserNotificationState`로 전체화면 여부를 구해 매 호출에 넘긴다.
+
+      ## 규칙
+      s3의 "안정된 뒤 판단"에서 재생 중이고, 제목이 있고, 처리한 곡과 다른 곡이라 Show/Replace를 돌려줄 차례일 때,
+      다음 중 하나면 대신 `None`을 돌려준다.
+      - `settings.IsAppEnabled(snapshot.AppId)`가 false. 처음 보는 앱은 켜진 것으로 본다(s1에서 만든 `IsAppEnabled` 규칙을 그대로 쓴다).
+      - `settings.HideWhenFullscreen`이 true이고 `isFullscreen`이 true.
+      이때 그 곡을 처리한 곡으로 기록하고, 표시 종료 시각은 바꾸지 않는다. 이유: 곡 변경 외의 계기(전체화면 종료, 앱을 다시
+      켬)로 나중에 팝업이 뜨면 안 된다(PRD "범위 밖"의 트리거 항목). 일시정지 규칙과 달리 나중에 다시 띄우지 않는다.
+
+      방해 금지 모드 입력은 추가하지 마라. 이유: 감지할 공식 API가 있는지 아직 확인하지 않았다(ARCHITECTURE "구현 전에 확인할
+      것"; PRD 3은 안정적으로 감지할 수 있을 때만 적용한다). 현재 세션이 아닌 세션을 거르는 일은 App 어댑터의 몫이므로 Core에
+      넣지 마라. `AppSettings`는 고치지 마라.
+
+      ## 테스트 (`tests/Soriseom.Core.Tests/PopupDeciderTests.cs`에 추가)
+      기존 s3 테스트는 새 시그니처에 맞게 호출만 고치고(`isFullscreen: false`) 기대값과 검증 내용은 바꾸지 마라.
+      다음을 각각 검증한다:
+      - 꺼진 앱의 새 곡은 None. 그 앱을 다시 켠 설정으로 같은 곡을 평가해도 None. 그 앱의 다음 곡은 켠 설정에서 Show.
+      - 설정 목록에 없는 앱의 새 곡은 Show.
+      - 전체화면이고 HideWhenFullscreen이 true면 None. 전체화면이 끝난 뒤 같은 곡은 None, 다음 곡은 Show.
+      - 전체화면이어도 HideWhenFullscreen이 false면 Show.
+      - 곡 A를 Show한 뒤 표시 시간 안에 제외된 곡 B가 오고, 이어서 표시 시간 안에 정상 곡 C가 안정되면 Replace다
+        (제외된 곡이 표시 종료 시각을 바꾸지 않음).
+    expected_files:
+      - src/Soriseom.Core/PopupDecider.cs
+      - tests/Soriseom.Core.Tests/PopupDeciderTests.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-class "Soriseom.Core.Tests.PopupDeciderTests"'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
