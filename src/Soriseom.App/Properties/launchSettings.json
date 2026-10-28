@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "Soriseom.App (Package)": {
+      "commandName": "MsixPackage"
+    }
+  }
+}

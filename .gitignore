@@ -193,6 +193,10 @@ publish/
 # Note: Comment the next line if you want to checkin your web deploy settings,
 # but database connection strings (with potential passwords) will be unencrypted
 *.pubxml
+# Track the WinUI template publish profiles required by the App build.
+!src/Soriseom.App/Properties/PublishProfiles/win-x64.pubxml
+!src/Soriseom.App/Properties/PublishProfiles/win-arm64.pubxml
+!src/Soriseom.App/Properties/PublishProfiles/win-x86.pubxml
 *.publishproj
 
 # Microsoft Azure Web App publish settings. Comment the next line if you want to

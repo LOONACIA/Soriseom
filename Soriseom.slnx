@@ -5,6 +5,12 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/src/">
+    <Project Path="src/Soriseom.App/Soriseom.App.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+      <Platform Solution="*|x86" Project="x86" />
+      <Deploy />
+    </Project>
     <Project Path="src/Soriseom.Core/Soriseom.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
