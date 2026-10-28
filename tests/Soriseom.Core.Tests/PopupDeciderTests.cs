@@ -15,13 +15,13 @@ public class PopupDeciderTests
         var settings = new AppSettings();
         var track = new MediaSnapshot("player", "Song", "Artist", isPlaying);
 
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, Start));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track with { }, settings, Start + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, Start));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track with { }, settings, isFullscreen: false, Start + PopupDecider.SettleDelay));
 
         var playing = track with { IsPlaying = true };
         var resumedAt = Start.AddSeconds(1);
-        decider.Decide(playing, settings, resumedAt);
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(playing, settings, resumedAt + PopupDecider.SettleDelay));
+        decider.Decide(playing, settings, isFullscreen: false, resumedAt);
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(playing, settings, isFullscreen: false, resumedAt + PopupDecider.SettleDelay));
     }
 
     [Theory]
@@ -33,14 +33,14 @@ public class PopupDeciderTests
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Original", "Artist", true);
         var track = original with { Title = "Next" };
-        decider.Decide(startsWithSession ? original : null, settings, Start);
+        decider.Decide(startsWithSession ? original : null, settings, isFullscreen: false, Start);
         var changedAt = Start.AddSeconds(1);
         var settledAt = changedAt + PopupDecider.SettleDelay;
 
-        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track, settings, changedAt));
-        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track with { }, settings, settledAt.AddTicks(-1)));
-        Assert.Equal(new(PopupAction.Show, track, null), decider.Decide(track with { }, settings, settledAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, settledAt.AddSeconds(1)));
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track, settings, isFullscreen: false, changedAt));
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track with { }, settings, isFullscreen: false, settledAt.AddTicks(-1)));
+        Assert.Equal(new(PopupAction.Show, track, null), decider.Decide(track with { }, settings, isFullscreen: false, settledAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt.AddSeconds(1)));
     }
 
     [Fact]
@@ -49,18 +49,18 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("browser", "Original", "Original artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var titleOnly = original with { Title = "Next" };
         var final = titleOnly with { Artist = "Next artist" };
         var titleChangedAt = Start.AddSeconds(1);
         var artistChangedAt = titleChangedAt + (PopupDecider.SettleDelay / 2);
         var settledAt = artistChangedAt + PopupDecider.SettleDelay;
 
-        Assert.Equal(new(PopupAction.None, null, titleChangedAt + PopupDecider.SettleDelay), decider.Decide(titleOnly, settings, titleChangedAt));
-        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(final, settings, artistChangedAt));
-        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(final, settings, titleChangedAt + PopupDecider.SettleDelay));
-        Assert.Equal(new(PopupAction.Show, final, null), decider.Decide(final, settings, settledAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(final, settings, settledAt.AddSeconds(1)));
+        Assert.Equal(new(PopupAction.None, null, titleChangedAt + PopupDecider.SettleDelay), decider.Decide(titleOnly, settings, isFullscreen: false, titleChangedAt));
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(final, settings, isFullscreen: false, artistChangedAt));
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(final, settings, isFullscreen: false, titleChangedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.Show, final, null), decider.Decide(final, settings, isFullscreen: false, settledAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(final, settings, isFullscreen: false, settledAt.AddSeconds(1)));
     }
 
     [Theory]
@@ -74,16 +74,16 @@ public class PopupDeciderTests
     {
         var decider = new PopupDecider();
         var settings = new AppSettings { DisplaySeconds = displaySeconds };
-        decider.Decide(null, settings, Start);
+        decider.Decide(null, settings, isFullscreen: false, Start);
         var first = new MediaSnapshot("player", "First", "Artist", true);
         var shownAt = Start.AddSeconds(1) + PopupDecider.SettleDelay;
-        decider.Decide(first, settings, shownAt - PopupDecider.SettleDelay);
-        Assert.Equal(new(PopupAction.Show, first, null), decider.Decide(first, settings, shownAt));
+        decider.Decide(first, settings, isFullscreen: false, shownAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.Show, first, null), decider.Decide(first, settings, isFullscreen: false, shownAt));
         var next = first with { Title = "Next" };
         var nextSettledAt = shownAt.AddSeconds(displaySeconds + offsetSeconds);
 
-        Assert.Equal(new(PopupAction.None, null, nextSettledAt), decider.Decide(next, settings, nextSettledAt - PopupDecider.SettleDelay));
-        Assert.Equal(new(expectedAction, next, null), decider.Decide(next, settings, nextSettledAt));
+        Assert.Equal(new(PopupAction.None, null, nextSettledAt), decider.Decide(next, settings, isFullscreen: false, nextSettledAt - PopupDecider.SettleDelay));
+        Assert.Equal(new(expectedAction, next, null), decider.Decide(next, settings, isFullscreen: false, nextSettledAt));
     }
 
     [Fact]
@@ -91,21 +91,21 @@ public class PopupDeciderTests
     {
         var decider = new PopupDecider();
         var settings = new AppSettings();
-        decider.Decide(null, settings, Start);
+        decider.Decide(null, settings, isFullscreen: false, Start);
         var first = new MediaSnapshot("player", "First", "Artist", true);
         var shownAt = Start.AddSeconds(1) + PopupDecider.SettleDelay;
-        decider.Decide(first, settings, shownAt - PopupDecider.SettleDelay);
-        Assert.Equal(new(PopupAction.Show, first, null), decider.Decide(first, settings, shownAt));
+        decider.Decide(first, settings, isFullscreen: false, shownAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.Show, first, null), decider.Decide(first, settings, isFullscreen: false, shownAt));
         var second = first with { Title = "Second" };
         var replacedAt = shownAt.AddSeconds(3);
         var updatedSettings = settings with { DisplaySeconds = 7 };
-        decider.Decide(second, updatedSettings, replacedAt - PopupDecider.SettleDelay);
-        Assert.Equal(new(PopupAction.Replace, second, null), decider.Decide(second, updatedSettings, replacedAt));
+        decider.Decide(second, updatedSettings, isFullscreen: false, replacedAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.Replace, second, null), decider.Decide(second, updatedSettings, isFullscreen: false, replacedAt));
         var third = first with { Title = "Third" };
         var thirdSettledAt = replacedAt.AddSeconds(6);
 
-        decider.Decide(third, updatedSettings, thirdSettledAt - PopupDecider.SettleDelay);
-        Assert.Equal(new(PopupAction.Replace, third, null), decider.Decide(third, updatedSettings, thirdSettledAt));
+        decider.Decide(third, updatedSettings, isFullscreen: false, thirdSettledAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.Replace, third, null), decider.Decide(third, updatedSettings, isFullscreen: false, thirdSettledAt));
     }
 
     [Theory]
@@ -117,12 +117,12 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Song", "Artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var changed = original with { AppId = appId, IsPlaying = isPlaying };
         var changedAt = Start.AddSeconds(1);
 
-        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(changed, settings, changedAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(changed, settings, changedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(changed, settings, isFullscreen: false, changedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(changed, settings, isFullscreen: false, changedAt + PopupDecider.SettleDelay));
     }
 
     [Fact]
@@ -131,16 +131,16 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Original", "Artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var paused = original with { Title = "Next", IsPlaying = false };
         var changedAt = Start.AddSeconds(1);
 
-        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(paused, settings, changedAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(paused, settings, changedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(paused, settings, isFullscreen: false, changedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(paused, settings, isFullscreen: false, changedAt + PopupDecider.SettleDelay));
         var playing = paused with { IsPlaying = true };
         var resumedAt = Start.AddSeconds(2);
-        Assert.Equal(new(PopupAction.None, null, resumedAt + PopupDecider.SettleDelay), decider.Decide(playing, settings, resumedAt));
-        Assert.Equal(new(PopupAction.Show, playing, null), decider.Decide(playing, settings, resumedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, resumedAt + PopupDecider.SettleDelay), decider.Decide(playing, settings, isFullscreen: false, resumedAt));
+        Assert.Equal(new(PopupAction.Show, playing, null), decider.Decide(playing, settings, isFullscreen: false, resumedAt + PopupDecider.SettleDelay));
     }
 
     [Fact]
@@ -149,15 +149,15 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var playing = new MediaSnapshot("player", "Song", "Artist", true);
-        decider.Decide(playing, settings, Start);
+        decider.Decide(playing, settings, isFullscreen: false, Start);
         var paused = playing with { IsPlaying = false };
         var pausedAt = Start.AddSeconds(1);
-        decider.Decide(paused, settings, pausedAt);
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(paused, settings, pausedAt + PopupDecider.SettleDelay));
+        decider.Decide(paused, settings, isFullscreen: false, pausedAt);
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(paused, settings, isFullscreen: false, pausedAt + PopupDecider.SettleDelay));
         var resumedAt = Start.AddSeconds(2);
 
-        Assert.Equal(new(PopupAction.None, null, resumedAt + PopupDecider.SettleDelay), decider.Decide(playing, settings, resumedAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(playing, settings, resumedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, resumedAt + PopupDecider.SettleDelay), decider.Decide(playing, settings, isFullscreen: false, resumedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(playing, settings, isFullscreen: false, resumedAt + PopupDecider.SettleDelay));
     }
 
     [Theory]
@@ -168,15 +168,15 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Original", "Artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var disappearedAt = Start.AddSeconds(1);
 
-        Assert.Equal(new(PopupAction.None, null, disappearedAt + PopupDecider.SettleDelay), decider.Decide(null, settings, disappearedAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(null, settings, disappearedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, disappearedAt + PopupDecider.SettleDelay), decider.Decide(null, settings, isFullscreen: false, disappearedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(null, settings, isFullscreen: false, disappearedAt + PopupDecider.SettleDelay));
         var returning = original with { Title = returningTitle };
         var returnedAt = Start.AddSeconds(2);
-        Assert.Equal(new(PopupAction.None, null, returnedAt + PopupDecider.SettleDelay), decider.Decide(returning, settings, returnedAt));
-        Assert.Equal(new(expectedAction, expectedAction == PopupAction.None ? null : returning, null), decider.Decide(returning, settings, returnedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, returnedAt + PopupDecider.SettleDelay), decider.Decide(returning, settings, isFullscreen: false, returnedAt));
+        Assert.Equal(new(expectedAction, expectedAction == PopupAction.None ? null : returning, null), decider.Decide(returning, settings, isFullscreen: false, returnedAt + PopupDecider.SettleDelay));
     }
 
     [Theory]
@@ -187,19 +187,114 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Original", "Artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var blank = original with { Title = title };
         var changedAt = Start.AddSeconds(1);
 
-        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(blank, settings, changedAt));
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(blank, settings, changedAt + PopupDecider.SettleDelay));
+        Assert.Equal(new(PopupAction.None, null, changedAt + PopupDecider.SettleDelay), decider.Decide(blank, settings, isFullscreen: false, changedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(blank, settings, isFullscreen: false, changedAt + PopupDecider.SettleDelay));
         var returnedAt = Start.AddSeconds(2);
-        decider.Decide(original, settings, returnedAt);
-        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(original, settings, returnedAt + PopupDecider.SettleDelay));
+        decider.Decide(original, settings, isFullscreen: false, returnedAt);
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(original, settings, isFullscreen: false, returnedAt + PopupDecider.SettleDelay));
         var next = original with { Title = "Next" };
         var nextAt = Start.AddSeconds(3);
-        decider.Decide(next, settings, nextAt);
-        Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, settings, nextAt + PopupDecider.SettleDelay));
+        decider.Decide(next, settings, isFullscreen: false, nextAt);
+        Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, settings, isFullscreen: false, nextAt + PopupDecider.SettleDelay));
+    }
+
+    [Fact]
+    public void DisabledAppTrackStaysSuppressedAfterReenablingButNextTrackShows()
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings();
+        var disabledSettings = settings with { Apps = settings.Apps.Add("player", false) };
+        decider.Decide(null, disabledSettings, isFullscreen: false, Start);
+        var track = new MediaSnapshot("player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+        var settledAt = changedAt + PopupDecider.SettleDelay;
+
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track, disabledSettings, isFullscreen: false, changedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, disabledSettings, isFullscreen: false, settledAt));
+        var enabledSettings = disabledSettings with { Apps = disabledSettings.Apps.SetItem("player", true) };
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, enabledSettings, isFullscreen: false, settledAt.AddSeconds(1)));
+        var next = track with { Title = "Next" };
+        var nextAt = settledAt.AddSeconds(2);
+        decider.Decide(next, enabledSettings, isFullscreen: false, nextAt);
+        Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, enabledSettings, isFullscreen: false, nextAt + PopupDecider.SettleDelay));
+    }
+
+    [Fact]
+    public void UnlistedAppTrackShows()
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings();
+        settings = settings with { Apps = settings.Apps.Add("disabled-player", false) };
+        decider.Decide(null, settings, isFullscreen: false, Start);
+        var track = new MediaSnapshot("new-player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+
+        decider.Decide(track, settings, isFullscreen: false, changedAt);
+        Assert.Equal(new(PopupAction.Show, track, null), decider.Decide(track, settings, isFullscreen: false, changedAt + PopupDecider.SettleDelay));
+    }
+
+    [Fact]
+    public void FullscreenTrackStaysSuppressedAfterLeavingFullscreenButNextTrackShows()
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings { HideWhenFullscreen = true };
+        decider.Decide(null, settings, isFullscreen: true, Start);
+        var track = new MediaSnapshot("player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+        var settledAt = changedAt + PopupDecider.SettleDelay;
+
+        Assert.Equal(new(PopupAction.None, null, settledAt), decider.Decide(track, settings, isFullscreen: true, changedAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: true, settledAt));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt.AddSeconds(1)));
+        var next = track with { Title = "Next" };
+        var nextAt = settledAt.AddSeconds(2);
+        decider.Decide(next, settings, isFullscreen: false, nextAt);
+        Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, settings, isFullscreen: false, nextAt + PopupDecider.SettleDelay));
+    }
+
+    [Fact]
+    public void FullscreenTrackShowsWhenHidingIsDisabled()
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings { HideWhenFullscreen = false };
+        decider.Decide(null, settings, isFullscreen: true, Start);
+        var track = new MediaSnapshot("player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+
+        decider.Decide(track, settings, isFullscreen: true, changedAt);
+        Assert.Equal(new(PopupAction.Show, track, null), decider.Decide(track, settings, isFullscreen: true, changedAt + PopupDecider.SettleDelay));
+    }
+
+    [Theory]
+    [InlineData(false, -1, PopupAction.Replace)]
+    [InlineData(false, 0, PopupAction.Show)]
+    [InlineData(false, 1, PopupAction.Show)]
+    [InlineData(true, -1, PopupAction.Replace)]
+    [InlineData(true, 0, PopupAction.Show)]
+    [InlineData(true, 1, PopupAction.Show)]
+    public void SuppressedTrackPreservesDisplayDeadline(bool isFullscreen, int offsetSeconds, PopupAction expectedAction)
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings();
+        decider.Decide(null, settings, isFullscreen: false, Start);
+        var first = new MediaSnapshot("player", "First", "Artist", true);
+        var shownAt = Start.AddSeconds(1) + PopupDecider.SettleDelay;
+        decider.Decide(first, settings, isFullscreen: false, shownAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.Show, first, null), decider.Decide(first, settings, isFullscreen: false, shownAt));
+        var suppressed = first with { Title = "Suppressed" };
+        var suppressedSettings = isFullscreen ? settings : settings with { Apps = settings.Apps.Add("player", false) };
+        var suppressedAt = shownAt.AddSeconds(2);
+        decider.Decide(suppressed, suppressedSettings, isFullscreen, suppressedAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(suppressed, suppressedSettings, isFullscreen, suppressedAt));
+        var next = first with { Title = "Next" };
+        var nextSettledAt = shownAt.AddSeconds(settings.DisplaySeconds + offsetSeconds);
+
+        decider.Decide(next, settings, isFullscreen: false, nextSettledAt - PopupDecider.SettleDelay);
+        Assert.Equal(new(expectedAction, next, null), decider.Decide(next, settings, isFullscreen: false, nextSettledAt));
     }
 
     [Theory]
@@ -212,11 +307,11 @@ public class PopupDeciderTests
         var decider = new PopupDecider();
         var settings = new AppSettings();
         var original = new MediaSnapshot("player", "Song", "Artist", true);
-        decider.Decide(original, settings, Start);
+        decider.Decide(original, settings, isFullscreen: false, Start);
         var changed = original with { Title = title, Artist = artist };
         var changedAt = Start.AddSeconds(1);
 
-        decider.Decide(changed, settings, changedAt);
-        Assert.Equal(new(PopupAction.Show, changed, null), decider.Decide(changed, settings, changedAt + PopupDecider.SettleDelay));
+        decider.Decide(changed, settings, isFullscreen: false, changedAt);
+        Assert.Equal(new(PopupAction.Show, changed, null), decider.Decide(changed, settings, isFullscreen: false, changedAt + PopupDecider.SettleDelay));
     }
 }

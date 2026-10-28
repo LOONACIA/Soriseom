@@ -11,7 +11,7 @@ public sealed class PopupDecider
     private string? _processedArtist;
     private DateTimeOffset? _displayUntil;
 
-    public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, DateTimeOffset now)
+    public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, bool isFullscreen, DateTimeOffset now)
     {
         if (!_initialized)
         {
@@ -52,6 +52,11 @@ public sealed class PopupDecider
 
         _processedTitle = snapshot.Title;
         _processedArtist = snapshot.Artist;
+        if (!settings.IsAppEnabled(snapshot.AppId) || (settings.HideWhenFullscreen && isFullscreen))
+        {
+            return new(PopupAction.None, null, null);
+        }
+
         var action = now < _displayUntil ? PopupAction.Replace : PopupAction.Show;
         _displayUntil = now.AddSeconds(settings.DisplaySeconds);
         return new(action, snapshot, null);
