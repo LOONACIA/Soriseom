@@ -64,4 +64,16 @@
   <data name="AppDescription" xml:space="preserve">
     <value>곡이 바뀔 때 지금 재생 중인 음악을 잠깐 보여줍니다.</value>
   </data>
+  <data name="SettingsWindowTitle" xml:space="preserve">
+    <value>소리섬 설정</value>
+  </data>
+  <data name="SettingsHeader.Text" xml:space="preserve">
+    <value>설정</value>
+  </data>
+  <data name="TraySettings" xml:space="preserve">
+    <value>설정</value>
+  </data>
+  <data name="TrayExit" xml:space="preserve">
+    <value>종료</value>
+  </data>
 </root>

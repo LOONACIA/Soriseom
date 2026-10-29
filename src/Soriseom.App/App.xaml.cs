@@ -8,7 +8,8 @@ namespace Soriseom.App;
 /// </summary>
 public partial class App : Application
 {
-    private Window? _window;
+    private SettingsWindow? _settingsWindow;
+    private TrayController? _trayController;
     private PopupController? _popupController;
 
     /// <summary>
@@ -27,10 +28,18 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
-        _window.Closed += (_, _) => Exit();
-        _window.Activate();
+        _settingsWindow = new SettingsWindow();
+        _trayController = new TrayController(ShowSettings, ExitApplication);
+        ShowSettings();
         _popupController = new PopupController(DispatcherQueue.GetForCurrentThread());
         await _popupController.StartAsync();
+    }
+
+    private void ShowSettings() => _settingsWindow?.ShowAndActivate();
+
+    private void ExitApplication()
+    {
+        _trayController?.Dispose();
+        Exit();
     }
 }

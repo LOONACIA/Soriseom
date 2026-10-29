@@ -1,4 +1,5 @@
 GetDpiForMonitor
+GetDpiForWindow
 GetWindowLong
 SetWindowLong
 WINDOW_EX_STYLE

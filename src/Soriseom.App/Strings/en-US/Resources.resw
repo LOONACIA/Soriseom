@@ -64,4 +64,16 @@
   <data name="AppDescription" xml:space="preserve">
     <value>Briefly shows what's playing when the track changes.</value>
   </data>
+  <data name="SettingsWindowTitle" xml:space="preserve">
+    <value>Soriseom Settings</value>
+  </data>
+  <data name="SettingsHeader.Text" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="TraySettings" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="TrayExit" xml:space="preserve">
+    <value>Exit</value>
+  </data>
 </root>
