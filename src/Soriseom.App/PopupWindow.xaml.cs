@@ -4,8 +4,11 @@ using Microsoft.UI.Xaml;
 using Soriseom.Core;
 using Windows.Graphics;
 using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.HiDpi;
+using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace Soriseom.App;
 
@@ -15,7 +18,7 @@ public sealed partial class PopupWindow : Window
     private const int HeightDip = 80;
     private const int MarginDip = 16;
 
-    public PopupWindow()
+    public unsafe PopupWindow()
     {
         InitializeComponent();
         var presenter = OverlappedPresenter.Create();
@@ -25,6 +28,16 @@ public sealed partial class PopupWindow : Window
         presenter.IsMinimizable = false;
         presenter.IsAlwaysOnTop = true;
         AppWindow.SetPresenter(presenter);
+
+        var hwnd = new HWND(Win32Interop.GetWindowFromWindowId(AppWindow.Id));
+        var extendedStyle = (WINDOW_EX_STYLE)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
+        extendedStyle |= WINDOW_EX_STYLE.WS_EX_LAYERED | WINDOW_EX_STYLE.WS_EX_TRANSPARENT
+            | WINDOW_EX_STYLE.WS_EX_TOOLWINDOW | WINDOW_EX_STYLE.WS_EX_NOACTIVATE;
+        PInvoke.SetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, (int)extendedStyle);
+        PInvoke.SetLayeredWindowAttributes(hwnd, new COLORREF(0), 255, LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA);
+
+        var preference = DWM_WINDOW_CORNER_PREFERENCE.DWMWCP_ROUND;
+        PInvoke.DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(DWM_WINDOW_CORNER_PREFERENCE));
     }
 
     public void ShowTrack(MediaSnapshot track, PopupPosition position)

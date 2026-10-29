@@ -1,1 +1,7 @@
 GetDpiForMonitor
+GetWindowLong
+SetWindowLong
+WINDOW_EX_STYLE
+SetLayeredWindowAttributes
+DwmSetWindowAttribute
+DWM_WINDOW_CORNER_PREFERENCE
