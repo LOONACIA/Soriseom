@@ -45,10 +45,11 @@ public partial class App : Application
         var dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         mainInstance.Activated += (_, _) => dispatcherQueue.TryEnqueue(ShowSettings);
 
-        _settingsWindow = new SettingsWindow();
+        var store = new SettingsStore();
+        _settingsWindow = new SettingsWindow(store);
         _trayController = new TrayController(ShowSettings, ExitApplication);
         ShowSettings();
-        _popupController = new PopupController(dispatcherQueue);
+        _popupController = new PopupController(dispatcherQueue, store);
         await _popupController.StartAsync();
     }
 

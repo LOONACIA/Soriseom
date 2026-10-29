@@ -10,10 +10,47 @@
 
     <ScrollViewer>
         <StackPanel Padding="24" Spacing="8">
+            <StackPanel.Resources>
+                <Style x:Key="SettingsCardStyle" TargetType="Border">
+                    <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                    <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+                    <Setter Property="Padding" Value="16" />
+                </Style>
+            </StackPanel.Resources>
             <TextBlock
                 x:Uid="SettingsHeader"
                 Style="{StaticResource TitleTextBlockStyle}"
                 Margin="0,0,0,12" />
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <Slider
+                    x:Uid="DisplaySecondsSlider"
+                    Minimum="{x:Bind ViewModel.MinDisplaySeconds}"
+                    Maximum="{x:Bind ViewModel.MaxDisplaySeconds}"
+                    StepFrequency="1"
+                    TickFrequency="1"
+                    TickPlacement="Outside"
+                    SnapsTo="StepValues"
+                    Value="{x:Bind ViewModel.DisplaySeconds, Mode=TwoWay}" />
+            </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <ComboBox
+                    x:Uid="PositionComboBox"
+                    SelectedIndex="{x:Bind ViewModel.PositionIndex, Mode=TwoWay}">
+                    <ComboBoxItem x:Uid="PositionTopLeft" />
+                    <ComboBoxItem x:Uid="PositionTopCenter" />
+                    <ComboBoxItem x:Uid="PositionTopRight" />
+                    <ComboBoxItem x:Uid="PositionBottomLeft" />
+                    <ComboBoxItem x:Uid="PositionBottomCenter" />
+                    <ComboBoxItem x:Uid="PositionBottomRight" />
+                </ComboBox>
+            </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <ToggleSwitch
+                    x:Uid="HideWhenFullscreenToggle"
+                    IsOn="{x:Bind ViewModel.HideWhenFullscreen, Mode=TwoWay}" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Window>

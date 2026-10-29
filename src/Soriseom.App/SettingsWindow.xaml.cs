@@ -13,8 +13,9 @@ public sealed partial class SettingsWindow : Window
     private const int WidthDip = 560;
     private const int HeightDip = 640;
 
-    public SettingsWindow()
+    internal SettingsWindow(SettingsStore store)
     {
+        ViewModel = new SettingsViewModel(store);
         InitializeComponent();
         Title = new ResourceLoader().GetString("SettingsWindowTitle");
 
@@ -29,6 +30,8 @@ public sealed partial class SettingsWindow : Window
             sender.Hide();
         };
     }
+
+    public SettingsViewModel ViewModel { get; }
 
     public void ShowAndActivate()
     {

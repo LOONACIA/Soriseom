@@ -12,19 +12,19 @@ internal sealed class PopupController
     private readonly MediaSessionAdapter _adapter;
     private readonly PopupDecider _decider;
     private readonly PopupWindow _window;
-    private readonly AppSettings _settings;
+    private readonly SettingsStore _store;
     private readonly DispatcherQueueTimer _reevaluateTimer;
     private readonly DispatcherQueueTimer _hideTimer;
     private MediaSnapshot? _displayedTrack;
     private IRandomAccessStreamReference? _displayedThumbnail;
     private bool _isShowing;
 
-    public PopupController(DispatcherQueue dispatcherQueue)
+    public PopupController(DispatcherQueue dispatcherQueue, SettingsStore store)
     {
         _adapter = new MediaSessionAdapter(dispatcherQueue);
         _decider = new PopupDecider();
         _window = new PopupWindow();
-        _settings = new AppSettings();
+        _store = store;
         _reevaluateTimer = dispatcherQueue.CreateTimer();
         _reevaluateTimer.IsRepeating = false;
         _reevaluateTimer.Tick += (_, _) => Evaluate();
@@ -60,8 +60,9 @@ internal sealed class PopupController
 
     private void Evaluate()
     {
+        var settings = _store.Current;
         var now = DateTimeOffset.UtcNow;
-        var decision = _decider.Decide(_adapter.Current, _settings, isFullscreen: IsFullscreen(), now);
+        var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now);
         _reevaluateTimer.Stop();
         if (decision.ReevaluateAt is { } reevaluateAt)
         {
@@ -75,9 +76,9 @@ internal sealed class PopupController
             _displayedTrack = track;
             _displayedThumbnail = _adapter.CurrentThumbnail;
             _isShowing = true;
-            _window.ShowTrack(track, _displayedThumbnail, _settings.Position);
+            _window.ShowTrack(track, _displayedThumbnail, settings.Position);
             _hideTimer.Stop();
-            _hideTimer.Interval = TimeSpan.FromSeconds(_settings.DisplaySeconds);
+            _hideTimer.Interval = TimeSpan.FromSeconds(settings.DisplaySeconds);
             _hideTimer.Start();
         }
         else if (decision.Action == PopupAction.None && _isShowing

@@ -70,6 +70,33 @@
   <data name="SettingsHeader.Text" xml:space="preserve">
     <value>설정</value>
   </data>
+  <data name="DisplaySecondsSlider.Header" xml:space="preserve">
+    <value>표시 시간(초)</value>
+  </data>
+  <data name="PositionComboBox.Header" xml:space="preserve">
+    <value>위치</value>
+  </data>
+  <data name="PositionTopLeft.Content" xml:space="preserve">
+    <value>위쪽 왼쪽</value>
+  </data>
+  <data name="PositionTopCenter.Content" xml:space="preserve">
+    <value>위쪽 가운데</value>
+  </data>
+  <data name="PositionTopRight.Content" xml:space="preserve">
+    <value>위쪽 오른쪽</value>
+  </data>
+  <data name="PositionBottomLeft.Content" xml:space="preserve">
+    <value>아래쪽 왼쪽</value>
+  </data>
+  <data name="PositionBottomCenter.Content" xml:space="preserve">
+    <value>아래쪽 가운데</value>
+  </data>
+  <data name="PositionBottomRight.Content" xml:space="preserve">
+    <value>아래쪽 오른쪽</value>
+  </data>
+  <data name="HideWhenFullscreenToggle.Header" xml:space="preserve">
+    <value>전체화면일 때 숨기기</value>
+  </data>
   <data name="TraySettings" xml:space="preserve">
     <value>설정</value>
   </data>

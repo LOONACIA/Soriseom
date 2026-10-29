@@ -70,6 +70,33 @@
   <data name="SettingsHeader.Text" xml:space="preserve">
     <value>Settings</value>
   </data>
+  <data name="DisplaySecondsSlider.Header" xml:space="preserve">
+    <value>Display time (seconds)</value>
+  </data>
+  <data name="PositionComboBox.Header" xml:space="preserve">
+    <value>Position</value>
+  </data>
+  <data name="PositionTopLeft.Content" xml:space="preserve">
+    <value>Top left</value>
+  </data>
+  <data name="PositionTopCenter.Content" xml:space="preserve">
+    <value>Top center</value>
+  </data>
+  <data name="PositionTopRight.Content" xml:space="preserve">
+    <value>Top right</value>
+  </data>
+  <data name="PositionBottomLeft.Content" xml:space="preserve">
+    <value>Bottom left</value>
+  </data>
+  <data name="PositionBottomCenter.Content" xml:space="preserve">
+    <value>Bottom center</value>
+  </data>
+  <data name="PositionBottomRight.Content" xml:space="preserve">
+    <value>Bottom right</value>
+  </data>
+  <data name="HideWhenFullscreenToggle.Header" xml:space="preserve">
+    <value>Hide while an app is full screen</value>
+  </data>
   <data name="TraySettings" xml:space="preserve">
     <value>Settings</value>
   </data>
