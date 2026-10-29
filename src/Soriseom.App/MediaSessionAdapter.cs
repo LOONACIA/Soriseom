@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Soriseom.Core;
 using Windows.Media.Control;
+using Windows.Storage.Streams;
 
 namespace Soriseom.App;
 
@@ -20,6 +21,8 @@ internal sealed class MediaSessionAdapter
     public event EventHandler? Changed;
 
     public MediaSnapshot? Current { get; private set; }
+
+    public IRandomAccessStreamReference? CurrentThumbnail { get; private set; }
 
     public async Task StartAsync()
     {
@@ -66,6 +69,7 @@ internal sealed class MediaSessionAdapter
             Current = null;
             if (_session is null)
             {
+                CurrentThumbnail = null;
                 Changed?.Invoke(this, EventArgs.Empty);
                 return;
             }
@@ -99,6 +103,7 @@ internal sealed class MediaSessionAdapter
 
             bool isPlaying = session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             Current = new MediaSnapshot(session.SourceAppUserModelId, properties.Title ?? string.Empty, properties.Artist ?? string.Empty, isPlaying);
+            CurrentThumbnail = properties.Thumbnail;
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
