@@ -1,0 +1,421 @@
+id: gsmtc-popup-window
+goal: >
+  실제 앱에서 Windows가 현재 세션으로 정한 미디어 세션의 곡이 바뀌면, 주 모니터 위쪽 가운데에 제목·아티스트·앨범아트
+  (없으면 음표 아이콘)를 담은 단색 배경 팝업이 포커스를 가져가지 않고 클릭을 통과시키며 미끄러져 나타났다가 표시 시간 뒤
+  페이드로 사라지게 한다. App의 GSMTC 어댑터 → Core `PopupDecider` → App 팝업 창을 연결하고, 전체화면일 때는 띄우지 않는다.
+  팝업 위치 계산은 Core에 두고 테스트한다. 설정은 `AppSettings` 기본값으로 고정한다. 완료는 CLAUDE.md의 검사 3개(x64 빌드,
+  Core 테스트, 포맷 검사)와 로컬 MSIX 생성이 통과하고, 사람이 Visual Studio에서 docs/PRD.md 1·2절의 완료 기준을 수동으로
+  확인할 수 있는 상태다. Acrylic 배경(레이어드 창과 함께 쓸 수 있는지 확인되지 않음), 설정 창과 설정 저장, 트레이,
+  단일 인스턴스, 자동 실행, 방해 금지 감지, CI, Release 빌드는 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-popup-placement
+    title: compute popup placement within the work area
+    type: feat
+    scope: core
+    description: |
+      먼저 읽을 파일: docs/PRD.md("2. 팝업 모양과 동작", "4. 설정 창" 표의 위치 항목), docs/ARCHITECTURE.md("레이어 규칙",
+      "창과 셸 연동 (App)"의 팝업 창), `src/Soriseom.Core/PopupPosition.cs`, `src/Soriseom.Core/AppSettings.cs`,
+      `tests/Soriseom.Core.Tests/AppSettingsTests.cs`(테스트 스타일).
+
+      Core에 팝업 창의 화면 위치 계산을 추가한다. 다음 스텝 s2에서 App의 팝업 창이 주 모니터 작업 영역(물리 픽셀)과,
+      DPI 배율을 적용해 물리 픽셀로 바꾼 팝업 크기·여백을 넘겨 이 계산으로 창 위치를 정한다. 이 계산은 픽셀 정수만 다루며
+      DPI 변환은 App이 한다.
+
+      ## 타입 (namespace `Soriseom.Core`, `src/Soriseom.Core/` 바로 아래, 파일 하나에 타입 하나)
+      - `PixelRect.cs`: `public readonly record struct PixelRect(int X, int Y, int Width, int Height);`
+        화면 물리 픽셀 사각형이며 X, Y는 왼쪽 위 모서리다.
+      - `PopupPlacement.cs`: `public static class PopupPlacement`,
+        `public static PixelRect Compute(PopupPosition position, PixelRect workArea, int width, int height, int margin)`
+
+      ## 규칙
+      - 결과의 Width, Height는 인자 `width`, `height` 그대로다.
+      - 가로: `TopLeft`/`BottomLeft`는 `workArea.X + margin`, `TopCenter`/`BottomCenter`는
+        `workArea.X + (workArea.Width - width) / 2`(C# 정수 나눗셈, 가운데 정렬에는 margin을 쓰지 않는다),
+        `TopRight`/`BottomRight`는 `workArea.X + workArea.Width - width - margin`.
+      - 세로: `Top*`는 `workArea.Y + margin`, `Bottom*`는 `workArea.Y + workArea.Height - height - margin`.
+      - enum에 정의되지 않은 값은 `ArgumentOutOfRangeException`을 던진다. 이유: switch 식이 모든 값을 다루지 않으면
+        CS8524 경고가 나고 경고는 오류로 처리된다.
+      - 팝업이 작업 영역보다 클 때의 보정은 넣지 마라. 이유: 고정 크기 팝업(360×80 DIP)이 작업 영역을 넘는 일은 없다.
+      - 다른 Core 파일(`AppSettings`, `PopupDecider` 등)은 고치지 마라.
+
+      ## 테스트 `tests/Soriseom.Core.Tests/PopupPlacementTests.cs` (namespace `Soriseom.Core.Tests`, class `PopupPlacementTests`)
+      다음을 각각 검증한다.
+      - 작업 영역 (0, 0, 1920, 1040), 크기 360×80, 여백 16에서 6곳 모두(`[Theory]`): TopLeft (16, 16), TopCenter (780, 16),
+        TopRight (1544, 16), BottomLeft (16, 944), BottomCenter (780, 944), BottomRight (1544, 944). 결과 Width/Height는 360/80.
+      - 작업 영역이 원점에서 떨어진 경우(작업 표시줄이 위·왼쪽에 있는 경우), 작업 영역 (60, 48, 1860, 1032), 같은 크기·여백:
+        TopLeft (76, 64), TopCenter (810, 64), BottomRight (1544, 984).
+      - 남는 폭이 홀수면 가운데 X는 정수 나눗셈 결과다: 작업 영역 (0, 0, 1921, 1040)의 TopCenter X는 780.
+      - `(PopupPosition)99`는 `ArgumentOutOfRangeException`.
+    expected_files:
+      - src/Soriseom.Core/PixelRect.cs
+      - src/Soriseom.Core/PopupPlacement.cs
+      - tests/Soriseom.Core.Tests/PopupPlacementTests.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-class "Soriseom.Core.Tests.PopupPlacementTests"'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s2-track-popup
+    title: show a text popup when the current track changes
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "주의", "구조 규칙"), docs/PRD.md("1. 곡 변경 팝업", "2. 팝업 모양과 동작",
+      "3. 표시하지 않는 경우"의 마지막 항목), docs/ARCHITECTURE.md("레이어 규칙", "데이터 흐름", "창과 셸 연동 (App)",
+      "횡단 관심사"의 에러 처리·로깅), docs/ADR.md("원칙"의 패키지 목록, ADR-001, ADR-002, ADR-005),
+      `src/Soriseom.Core/PopupDecider.cs`, `PopupDecision.cs`, `PopupAction.cs`, `MediaSnapshot.cs`, `AppSettings.cs`,
+      s1이 만든 `src/Soriseom.Core/PopupPlacement.cs`, `PixelRect.cs`, 그리고 `src/Soriseom.App/App.xaml.cs`,
+      `MainWindow.xaml`, `MainWindow.xaml.cs`, `Soriseom.App.csproj`.
+
+      목표: Windows 현재 미디어 세션의 곡이 바뀌면 주 모니터 위쪽 가운데에 제목과 아티스트를 담은 팝업이 포커스를 가져가지
+      않고 떴다가 표시 시간 뒤 사라진다. 이 스텝의 팝업은 단색 배경, 음표 아이콘 자리, 텍스트만 가진다. 다음은 이후 스텝에서
+      하므로 지금 넣지 마라: 클릭 통과·작업 표시줄과 Alt+Tab 제외·둥근 모서리(s3), 앨범아트(s4), 전체화면 감지(s5),
+      애니메이션(s6). 단색 배경은 이 계획의 최종 배경이다. Acrylic은 이 계획 밖이므로 `SystemBackdrop`을 설정하지 마라.
+
+      새 타입은 모두 namespace `Soriseom.App`, `src/Soriseom.App/` 바로 아래에 두고 파일 하나에 타입 하나다.
+
+      ## 1. `MediaSessionAdapter.cs`: GSMTC 어댑터
+      `internal sealed class MediaSessionAdapter`. GSMTC(`Windows.Media.Control`)를 다루는 유일한 곳이다(ARCHITECTURE "레이어 규칙").
+      - `public MediaSessionAdapter(DispatcherQueue dispatcherQueue)` (`Microsoft.UI.Dispatching.DispatcherQueue`)
+      - `public event EventHandler? Changed;`
+      - `public MediaSnapshot? Current { get; private set; }`
+      - `public async Task StartAsync()`: `GlobalSystemMediaTransportControlsSessionManager.RequestAsync()`로 매니저를 얻어
+        필드에 두고, `CurrentSessionChanged`를 구독하고, `GetCurrentSession()`(null 가능)을 붙인 뒤 첫 미디어 속성 읽기가
+        끝날 때까지 기다린다. 예외를 밖으로 던지지 않는다. 실패하면 `Debug.WriteLine`으로 남기고 `Current`는 null로 둔다.
+
+      상태와 갱신 규칙:
+      - `Current`, 내부 상태, `Changed` 발생은 모두 UI 스레드(생성자에 받은 DispatcherQueue)에서만 다룬다. GSMTC 이벤트는
+        백그라운드 스레드에서 오므로 핸들러는 `TryEnqueue`로 UI 스레드에 넘기기만 한다. 이유: `PopupDecider`는 스레드
+        안전하지 않으며 UI 스레드에서만 부른다.
+      - 세션 붙이기(`CurrentSessionChanged`, 시작 시): 이전 세션의 `MediaPropertiesChanged`, `PlaybackInfoChanged` 구독을
+        해제하고 새 세션에 구독한 뒤 미디어 속성을 갱신한다. 새 세션이 null이면 바로 `Current = null`로 하고 `Changed`를
+        발생시킨다. 세션 이벤트 핸들러는 sender를 보지 않고 지금 붙은 세션을 갱신한다.
+      - 미디어 속성 갱신(세션 붙이기, `MediaPropertiesChanged`): `await session.TryGetMediaPropertiesAsync()`로 Title,
+        Artist를 읽고(null이면 빈 문자열) 재생 상태를 함께 읽어 `Current`를 다시 만든다. 비동기 읽기가 겹칠 수 있으므로
+        읽기를 시작할 때마다 늘어나는 버전 번호를 두고, 끝났을 때 최신 읽기가 아니거나 붙은 세션이 바뀌었으면 결과를
+        버린다. 이유: 늦게 끝난 이전 읽기가 새 곡 정보를 덮으면 안 된다.
+      - 재생 상태 갱신(`PlaybackInfoChanged`): `session.GetPlaybackInfo().PlaybackStatus == Playing`만 동기로 다시 읽고,
+        마지막으로 읽은 Title/Artist로 `Current`를 다시 만든다. 미디어 속성을 다시 읽지 마라. 이유: s4에서 썸네일 참조가
+        미디어 속성을 새로 읽을 때만 바뀌어야 늦게 온 썸네일을 알아챌 수 있다. 이 세션의 미디어 속성을 아직 한 번도
+        읽지 못했으면 아무것도 하지 않는다.
+      - `Current`는 `new MediaSnapshot(session.SourceAppUserModelId, title, artist, isPlaying)`이다.
+      - 갱신이 끝날 때마다(값이 같아도) `Changed`를 발생시킨다. 같은 값 거르기는 `PopupDecider`가 한다.
+      - 세션이 사라지는 중에는 GSMTC 호출이 예외를 던질 수 있다. 갱신마다 try/catch로 감싸 `Debug.WriteLine`으로 남기고
+        그 갱신만 건너뛴다(ARCHITECTURE "에러 처리").
+      - `SessionsChanged`나 현재 세션이 아닌 세션은 다루지 마라. 이유: 현재 세션이 아닌 세션의 변화는 무시한다(PRD 3).
+      - 썸네일(`Thumbnail`)은 읽지 마라. 이유: s4에서 추가한다.
+
+      ## 2. `PopupWindow.xaml`, `PopupWindow.xaml.cs`: 팝업 창
+      `public sealed partial class PopupWindow : Window`.
+
+      XAML: 창 내용의 루트는 `Grid`(Padding 12, ColumnSpacing 12, Background `{ThemeResource SolidBackgroundFillColorBaseBrush}`)이고
+      열은 두 개(56, *)다.
+      - 0열: 56×56 `Border`(CornerRadius `{ThemeResource ControlCornerRadius}`, Background
+        `{ThemeResource ControlFillColorSecondaryBrush}`) 안에 음표 `FontIcon`(Glyph `&#xEC4F;`, FontSize 24).
+        s4에서 이 자리에 앨범아트가 들어간다.
+      - 1열: 세로 가운데 정렬 `StackPanel`에 `TextBlock` 두 개. `TitleText`(Style `{StaticResource BodyStrongTextBlockStyle}`),
+        `ArtistText`(Style `{StaticResource BodyTextBlockStyle}`, Foreground `{ThemeResource TextFillColorSecondaryBrush}`).
+        둘 다 `TextWrapping="NoWrap"`, `TextTrimming="CharacterEllipsis"`, `MaxLines="1"`. 이유: 너비는 고정이고 긴 제목과
+        아티스트는 말줄임표로 자른다(PRD 2).
+      - 창 `Title`과 하드코딩한 사용자 표시 문자열을 넣지 마라. `AutomationProperties.LiveSetting`을 설정하지 마라.
+        이유: 내레이터에 알리지 않는다(PRD 2).
+      - 바인딩이나 ViewModel 없이 코드 비하인드에서 `x:Name` 요소의 Text를 설정한다. 이유: 입력과 명령이 없는 표시 전용
+        창이고, MVVM 패키지는 설정 창 계획에서 들어온다.
+
+      코드:
+      - 생성자: `InitializeComponent()` 뒤 `OverlappedPresenter.Create()`로 프리젠터를 만들어 `SetBorderAndTitleBar(false, false)`,
+        `IsResizable`/`IsMaximizable`/`IsMinimizable`을 false, `IsAlwaysOnTop`을 true로 하고 `AppWindow.SetPresenter`로 적용한다.
+        생성자에서 창을 보이게 하지 마라.
+      - `private const int WidthDip = 360;`, `HeightDip = 80;`, `MarginDip = 16;`
+      - `public void ShowTrack(MediaSnapshot track, PopupPosition position)`:
+        1. `TitleText.Text`, `ArtistText.Text`에 `track.Title`, `track.Artist`를 넣는다.
+        2. `var display = DisplayArea.Primary;`의 `WorkArea`(물리 픽셀)를 쓴다. 주 모니터에만 띄운다(PRD 2).
+        3. 배율: `Win32Interop.GetMonitorFromDisplayId(display.DisplayId)`로 모니터 핸들을 얻고
+           `PInvoke.GetDpiForMonitor(new HMONITOR(monitor), MONITOR_DPI_TYPE.MDT_EFFECTIVE_DPI, out uint dpiX, out _)`로 DPI를
+           구해 `dpiX / 96.0`으로 한다. 반환된 `HRESULT`가 `Failed`면 1.0을 쓴다.
+        4. 크기와 여백을 `(int)Math.Round(dip * scale)`로 바꾸고 `PopupPlacement.Compute(position, workArea를 옮긴 PixelRect,
+           width, height, margin)`로 사각형을 구한다.
+        5. 먼저 `AppWindow.Move`로 작업 영역 왼쪽 위로 옮긴 뒤 `AppWindow.MoveAndResize`로 최종 사각형을 적용한다.
+           이유: DPI가 다른 모니터에 있던 창이 넘어올 때 Windows가 크기를 바꿀 수 있어, 같은 모니터 안에서 최종 크기를
+           다시 정한다.
+        6. `AppWindow.Show(false)`로 보인다. `Activate()`를 부르지 마라. 이유: 팝업은 포커스를 가져가지 않는다(PRD 2).
+      - `public void HidePopup()`: `AppWindow.Hide()`.
+
+      ## 3. CsWin32 도입과 `NativeMethods.txt`
+      Win32 P/Invoke는 직접 선언하지 않고 `Microsoft.Windows.CsWin32` 소스 생성기로 만든다.
+      1. `docs/ADR.md`를 고친다. 이유: ADR에 없는 패키지는 추가하지 않는다(CLAUDE.md, docs/ADR.md "원칙").
+         - "원칙"의 패키지 목록에서 `` - `StyleCop.Analyzers` 1.3 이상 (ADR-006) `` 줄 바로 위에 `` - `Microsoft.Windows.CsWin32` (ADR-008) ``를
+           같은 들여쓰기로 넣는다.
+         - 파일 끝(ADR-007 다음)에 빈 줄 하나를 두고 아래 ADR-008을 그대로 넣는다. 문구를 바꾸지 마라.
+
+           ```
+           ### ADR-008: Win32 P/Invoke는 CsWin32로 생성한다
+
+           - **상태**: 채택
+           - **결정**: App에서 Win32 API(창 확장 스타일, DWM, DPI, 셸 알림 상태)를 부를 때는 `Microsoft.Windows.CsWin32` 소스 생성기를 씁니다. 필요한 API 이름을 `src/Soriseom.App/NativeMethods.txt`에 적고, 생성된 `Windows.Win32.PInvoke`와 타입(`HWND`, `HRESULT`, enum)을 씁니다.
+           - **이유**: App 코드는 빌드와 수동 확인으로만 검증하므로(ADR-004) 손으로 쓴 시그니처가 틀리면 실행해야 드러납니다. CsWin32는 공식 Win32 메타데이터에서 CPU 아키텍처별로 맞는 선언과 상수를 만듭니다. 개발 의존성이라 앱에 런타임 의존성을 더하지 않습니다.
+           - **검토한 대안**: `[LibraryImport]` 직접 선언(의존성은 없지만 시그니처와 상수를 손으로 관리하고, Win32 상수 이름을 StyleCop 규칙에 맞게 바꿔야 함)
+           - **트레이드오프**: 0.x 버전이고, 빌드할 때 함께 받는 메타데이터 패키지(`Microsoft.Windows.SDK.Win32Metadata` 등)는 preview/experimental입니다. 생성 코드가 저장소에 없어 리뷰할 때 시그니처를 diff로 볼 수 없습니다. 2026-10-29에 0.3.330이 이 저장소 설정(경고=오류, StyleCop, x64·x86·ARM64)에서 경고 없이 빌드되는 것을 확인했습니다.
+           - **하네스에 미치는 영향**: `[DllImport]`나 `[LibraryImport]`로 Win32 함수를 직접 선언하지 마세요. 필요한 API는 `NativeMethods.txt`에 이름을 추가하세요. Win32 상수를 직접 정의하지 말고 생성된 enum과 상수를 쓰세요.
+           ```
+      2. `dotnet add src/Soriseom.App package Microsoft.Windows.CsWin32 --version 0.3.330`. 버전은 `Directory.Packages.props`에
+         들어가고, csproj에는 버전 없는 참조와 `dotnet add`가 넣는 `IncludeAssets`/`PrivateAssets`가 남는다. 이 버전은
+         2026-10-29에 이 저장소 설정으로 x64·x86·ARM64 빌드와 포맷 검사를 확인했고 로컬 NuGet 캐시에 있다.
+      3. `src/Soriseom.App/NativeMethods.txt`에 `GetDpiForMonitor` 한 줄만 둔다. 생성기가
+         `PInvoke.GetDpiForMonitor(HMONITOR, MONITOR_DPI_TYPE, out uint, out uint)`(`HRESULT` 반환)와 필요한 타입을 만든다
+         (namespace `Windows.Win32`, `Windows.Win32.Graphics.Gdi`, `Windows.Win32.UI.HiDpi`, `Windows.Win32.Foundation`).
+         s3, s5가 이 파일에 이름을 더한다.
+      - csproj에 `AllowUnsafeBlocks`를 직접 넣지 마라. 이유: CsWin32 패키지의 props가 켠다.
+      - `[DllImport]`, `[LibraryImport]`로 직접 선언하지 말고, 생성된 `PInvoke`를 감싸는 `NativeMethods` 같은 클래스를 만들지
+        마라. 이유: ADR-008, 생성된 `PInvoke`를 쓰는 곳에서 바로 부른다.
+
+      ## 4. `PopupController.cs`: 연결
+      `internal sealed class PopupController`.
+      - `public PopupController(DispatcherQueue dispatcherQueue)`: `MediaSessionAdapter`, `PopupDecider`, `PopupWindow`,
+        `AppSettings`(`new AppSettings()` 기본값 고정, 설정 저장·읽기는 이후 계획), 그리고 `dispatcherQueue.CreateTimer()`로
+        `IsRepeating = false`인 `DispatcherQueueTimer` 두 개(재평가 타이머, 숨김 타이머)를 만든다.
+      - `public async Task StartAsync()`: `await` 어댑터 `StartAsync()` 뒤 `Changed`를 구독하고 `Evaluate()`를 한 번 부른다.
+        이 첫 호출이 `PopupDecider`의 시작 호출이다(앱 시작 시에는 표시하지 않음, PRD "범위 밖").
+      - `Evaluate()`(Changed와 재평가 타이머 Tick에서 호출, 모두 UI 스레드):
+        - `var now = DateTimeOffset.UtcNow;`, `_decider.Decide(_adapter.Current, _settings, isFullscreen: false, now)`.
+          isFullscreen은 s5에서 실제 값으로 바꾼다.
+        - 재평가 타이머를 멈추고, 결과에 `ReevaluateAt`이 있으면 `Interval`을 `ReevaluateAt - now`(음수면 `TimeSpan.Zero`)로
+          해서 다시 시작한다.
+        - Action이 Show 또는 Replace면 결과의 Track으로 `_window.ShowTrack(track, _settings.Position)`을 부르고, 숨김 타이머를
+          멈춘 뒤 `Interval = TimeSpan.FromSeconds(_settings.DisplaySeconds)`로 다시 시작한다. 이유: 표시 중 곡이 또 바뀌면
+          표시 시간을 처음부터 다시 센다(PRD 1). null 허용 경고는 `!` 대신 패턴 매칭으로 피한다.
+      - 숨김 타이머 Tick: `_window.HidePopup()`.
+      - Show/Replace 구분, 안정화 대기, 반복 재생·일시정지 판단을 App에서 다시 구현하지 마라. 이유: 판단 규칙은 Core
+        `PopupDecider`에 있고 테스트돼 있다.
+
+      ## 5. `App.xaml.cs`
+      `OnLaunched`에서 기존처럼 `MainWindow`를 만들고 `Activate()`한 다음, `PopupController`를
+      `DispatcherQueue.GetForCurrentThread()`로 만들어 필드에 보관하고(GC 방지) `StartAsync()`를 await한다(`async void` 재정의).
+      `MainWindow`의 `Closed`에서 `Exit()`를 부른다. 이유: 트레이가 아직 없어서, 그렇지 않으면 MainWindow를 닫은 뒤 숨은
+      팝업 창 때문에 프로세스가 보이지 않게 남는다. 트레이 계획에서 이 동작을 바꾼다. 기존 XML 문서 주석은 그대로 둔다.
+
+      ## 하지 말 것
+      - 앱을 실행하지 마라(`dotnet run`, 빌드된 exe 실행, 패키지 등록·설치 포함). 이유: 창을 띄우는 GUI라 스스로 끝나지 않고,
+        패키지 앱이라 실행하면 개발용 패키지가 시스템에 등록된다. 동작 확인은 사람이 Visual Studio에서 한다.
+      - CsWin32 말고는 NuGet 패키지를 추가하지 마라(WinUIEx, CommunityToolkit.*, H.NotifyIcon 포함). 이유: docs/ADR.md 허용
+        목록에 없거나 이 계획에서 쓰지 않는다.
+      - `docs/ADR.md`에서 위 두 곳 말고는 고치지 마라.
+      - `Package.appxmanifest`에 capability를 추가하지 마라. 이유: runFullTrust 데스크톱 앱은 GSMTC에 별도 capability가
+        필요 없다고 보고 진행하며, 수동 확인에서 다르게 나오면 계획을 고친다.
+      - Core와 테스트 프로젝트를 고치지 마라.
+      - `Debug.WriteLine`은 catch 블록의 예외 기록에만 쓴다. 이유: 로그 파일과 전송은 없고 디버그 출력만 쓴다(ADR-005),
+        다른 디버그 흔적은 남기지 않는다.
+    expected_files:
+      - src/Soriseom.App/MediaSessionAdapter.cs
+      - src/Soriseom.App/PopupController.cs
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - src/Soriseom.App/NativeMethods.txt
+      - src/Soriseom.App/App.xaml.cs
+      - src/Soriseom.App/Soriseom.App.csproj
+      - Directory.Packages.props
+      - docs/ADR.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s3-unobtrusive-window
+    title: make the popup click-through and hidden from task switchers
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("2. 팝업 모양과 동작"), docs/ARCHITECTURE.md("창과 셸 연동 (App)", "구현 전에 확인할 것"),
+      docs/ADR.md(ADR-008), s2가 만든 `src/Soriseom.App/PopupWindow.xaml`, `PopupWindow.xaml.cs`, `NativeMethods.txt`.
+
+      팝업이 작업을 방해하지 않게 한다: 클릭이 뒤의 창으로 통과하고, 활성화되지 않고, 작업 표시줄과 Alt+Tab에 나오지 않고,
+      모서리가 둥글다(PRD 2). 배경은 s2의 단색 그대로 둔다. 표시·숨김 흐름과 `PopupController`는 바꾸지 않는다.
+
+      ## 1. `PopupWindow.xaml.cs`
+      - 생성자에서 프리젠터 설정 뒤, 창이 처음 보이기 전에 `new HWND(Win32Interop.GetWindowFromWindowId(AppWindow.Id))`로
+        HWND를 얻어 생성된 `PInvoke`로 다음을 한다(`Windows.Win32`, `Windows.Win32.Foundation`,
+        `Windows.Win32.UI.WindowsAndMessaging`, `Windows.Win32.Graphics.Dwm`).
+        1. `PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE)`로 읽은 확장 스타일에 `WINDOW_EX_STYLE.WS_EX_LAYERED`,
+           `WS_EX_TRANSPARENT`, `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`를 OR해서 `PInvoke.SetWindowLong`으로 쓴다(`int`로 캐스트).
+           이유: LAYERED와 TRANSPARENT를 함께 써야 클릭이 다른 프로세스의 뒤 창으로 통과하고, TOOLWINDOW는 작업 표시줄과
+           Alt+Tab에서 빼고, NOACTIVATE는 창이 활성화되지 않게 한다. `GetWindowLongPtr`/`SetWindowLongPtr`를 쓰지 마라.
+           이유: x86 user32에는 `SetWindowLongPtrW`가 없고(x86도 빌드 대상), 확장 스타일은 32비트 안에 들어간다.
+        2. `PInvoke.SetLayeredWindowAttributes(hwnd, new COLORREF(0), 255, LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA)`.
+           이유: 레이어드 창은 이 호출 전에는 보이지 않을 수 있다. s6이 이 알파 값으로 페이드를 구현한다.
+        3. `var preference = DWM_WINDOW_CORNER_PREFERENCE.DWMWCP_ROUND;`를
+           `PInvoke.DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(DWM_WINDOW_CORNER_PREFERENCE))`로
+           적용한다(`unsafe` 문맥). 이유: 테두리 없는 창은 Windows 11이 자동으로 둥글게 하지 않을 수 있다. Windows 10은 이
+           속성을 몰라 실패하므로 `HRESULT`는 무시한다.
+        이 Win32 호출들의 반환값으로 분기하지 않는다. 이유: 실패해도 팝업 표시는 계속돼야 하며 동작은 사람이 수동으로 확인한다.
+
+      ## 2. `NativeMethods.txt`
+      다음 이름을 한 줄에 하나씩 더한다: `GetWindowLong`, `SetWindowLong`, `WINDOW_EX_STYLE`, `SetLayeredWindowAttributes`,
+      `DwmSetWindowAttribute`, `DWM_WINDOW_CORNER_PREFERENCE`. `WINDOW_EX_STYLE`과 `DWM_WINDOW_CORNER_PREFERENCE`는 함수 시그니처에
+      나오지 않아 따로 적어야 생성된다. Win32 상수를 `const`로 직접 정의하지 마라. 이유: ADR-008, 생성된 enum을 쓴다.
+
+      ## 하지 말 것
+      - `SetWindowRgn`, `UpdateLayeredWindow`를 쓰지 마라. 이유: 창 영역과 픽셀 단위 알파를 쓰는 창은 Windows 11이 모서리를
+        둥글게 할 수 없다.
+      - `WS_EX_TOPMOST`를 직접 설정하지 마라(프리젠터 `IsAlwaysOnTop`이 맡는다). `AppWindow.IsShownInSwitchers`를 쓰지 마라
+        (`WS_EX_TOOLWINDOW`로 처리한다). 같은 일을 두 방법으로 하지 않는다.
+      - `SystemBackdrop`(`DesktopAcrylicBackdrop`, `MicaBackdrop`, 직접 만든 backdrop 포함)과 XAML `AcrylicBrush`를 쓰지 말고
+        `PopupWindow.xaml`의 배경을 바꾸지 마라. 이유: Acrylic과 레이어드 창을 함께 쓸 수 있는지 확인되지 않아, 클릭 통과를
+        먼저 확인한 뒤 이후 계획에서 따로 다룬다.
+      - `PopupController`, `MediaSessionAdapter`, `App.xaml.cs`, Core, 테스트를 고치지 마라. NuGet 패키지(WinUIEx 포함)를
+        추가하지 마라.
+      - 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용
+        패키지가 시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - src/Soriseom.App/NativeMethods.txt
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s4-album-art
+    title: show album art with a music note fallback
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("1. 곡 변경 팝업"의 표시 내용과 브라우저 갱신 항목), docs/ARCHITECTURE.md("데이터 흐름"의
+      팝업 창, "횡단 관심사"의 에러 처리), `src/Soriseom.App/MediaSessionAdapter.cs`, `PopupController.cs`, `PopupWindow.xaml`,
+      `PopupWindow.xaml.cs`.
+
+      팝업 왼쪽 56×56 자리에 앨범아트를 보여준다. 썸네일이 없거나 못 읽으면 음표 아이콘을 보여주고, 정사각형이 아닌 이미지는
+      가운데를 정사각형으로 잘라 보여준다(PRD 1). 브라우저가 썸네일을 늦게 갱신하면 표시 중인 팝업의 그림을 바꾼다.
+
+      ## 1. `MediaSessionAdapter`
+      `public IRandomAccessStreamReference? CurrentThumbnail { get; private set; }`(`Windows.Storage.Streams`)를 추가한다.
+      미디어 속성 갱신이 최신 읽기로 받아들여져 `Current`를 다시 만들 때만 `properties.Thumbnail`(null 가능)로 바꾸고, 세션이
+      없어지면 null로 한다. 재생 상태 갱신은 이 값을 바꾸지 않는다. 이유: 참조가 바뀌었다는 것이 미디어 속성을 새로 읽었다는
+      뜻이 되어야 컨트롤러가 늦게 온 썸네일을 알아챈다. 어댑터에서 스트림을 열지 마라.
+
+      ## 2. `PopupWindow.xaml`
+      0열의 56×56 자리를 같은 크기·CornerRadius의 `Border` 두 개를 겹친 `Grid`로 바꾼다.
+      - `NoteArt`: 지금의 음표 Border(배경과 `FontIcon` 그대로).
+      - `AlbumArt`: `Visibility="Collapsed"`, Background는
+        `<ImageBrush x:Name="AlbumArtBrush" Stretch="UniformToFill" AlignmentX="Center" AlignmentY="Center" />`.
+      이유: `UniformToFill`과 가운데 정렬이 16:9 썸네일 같은 이미지의 가운데를 정사각형으로 잘라 보여주고, Border 배경이라
+      둥근 모서리로 잘린다. 픽셀을 직접 자르는 코드를 쓰지 마라.
+
+      ## 3. `PopupWindow.xaml.cs`
+      - `ShowTrack` 시그니처를 `public void ShowTrack(MediaSnapshot track, IRandomAccessStreamReference? thumbnail, PopupPosition position)`로
+        바꾼다. 텍스트를 넣은 직후 `AlbumArt`를 숨기고 `NoteArt`를 보인다(이유: 새 곡 옆에 이전 곡의 앨범아트가 보이면 안 된다).
+        그다음 기존처럼 위치를 잡고 표시한 뒤 썸네일 로드를 시작한다. 표시를 로드 완료까지 미루지 마라.
+      - `public void UpdateThumbnail(IRandomAccessStreamReference? thumbnail)`: 같은 곡의 썸네일만 바뀐 경우다. 로드가 끝날
+        때까지 지금 그림을 유지한다.
+      - 로드(private, async): 시작할 때마다 늘어나는 버전 번호를 둔다. thumbnail이 null이면 음표를 보인다. 아니면
+        `using var stream = await thumbnail.OpenReadAsync();`, `var bitmap = new BitmapImage(); await bitmap.SetSourceAsync(stream);`
+        뒤, 최신 로드일 때만 `AlbumArtBrush.ImageSource = bitmap`으로 하고 `AlbumArt`를 보이고 `NoteArt`를 숨긴다. 예외는
+        `Debug.WriteLine`으로 남기고, 최신 로드였으면 음표를 보인다. `AlbumArtBrush.ImageFailed`에서도 음표로 돌아간다.
+        이유: 썸네일을 못 읽으면 음표 아이콘을 쓰고(ARCHITECTURE "에러 처리"), 늦게 끝난 이전 로드가 새 그림을 덮으면 안 된다.
+      - `DecodePixelWidth`/`DecodePixelHeight`를 설정하지 마라. 이유: 16:9 이미지를 한쪽 기준으로 줄여 디코드하면
+        `UniformToFill`로 다시 키울 때 흐려진다.
+
+      ## 4. `PopupController`
+      - Show/Replace 때 `_adapter.CurrentThumbnail`을 `ShowTrack`에 넘기고, 표시한 곡(`MediaSnapshot`), 넘긴 썸네일 참조,
+        표시 중 여부를 필드에 기록한다. 숨김 타이머 Tick에서 표시 중 여부를 끈다.
+      - `Evaluate`의 결과가 None이고, 표시 중이고, `_adapter.Current`의 (Title, Artist)가 표시한 곡과 ordinal로 같고,
+        `_adapter.CurrentThumbnail`이 기록한 참조와 다르면(`ReferenceEquals`로 비교) 기록을 바꾸고
+        `_window.UpdateThumbnail(...)`을 부른다. 숨김 타이머는 다시 시작하지 않는다. 이유: 브라우저는 제목과 썸네일을 따로
+        갱신하므로 안정화 대기 뒤에 썸네일이 올 수 있다(PRD 1). 썸네일만 바뀐 것은 곡 변경이 아니다.
+
+      ## 하지 말 것
+      - Core를 고치지 마라(`MediaSnapshot`에 썸네일을 넣지 마라). 이유: Core는 WinRT 타입을 참조하지 않고, 썸네일 변화는 곡
+        변경 판단에 쓰지 않는다.
+      - 썸네일을 파일이나 메모리 캐시에 저장하지 마라. 네트워크로 이미지를 받지 마라(ADR-005).
+      - NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는
+        GUI이고, 실행하면 개발용 패키지가 시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/MediaSessionAdapter.cs
+      - src/Soriseom.App/PopupController.cs
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s5-fullscreen-detection
+    title: pass fullscreen state to the popup decider
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("3. 표시하지 않는 경우"), docs/ARCHITECTURE.md("창과 셸 연동 (App)"의 전체화면 감지,
+      "구현 전에 확인할 것"의 방해 금지 항목), `src/Soriseom.Core/PopupDecider.cs`(isFullscreen 처리),
+      `src/Soriseom.App/PopupController.cs`, `src/Soriseom.App/NativeMethods.txt`, docs/ADR.md(ADR-008).
+
+      전체화면 앱을 쓰는 중에는 팝업을 띄우지 않는다(PRD 3, 설정 기본값 켜짐). 판단은 이미 Core `PopupDecider`가
+      `isFullscreen` 인자와 `settings.HideWhenFullscreen`으로 하므로, App은 실제 전체화면 여부만 넘긴다.
+
+      - `NativeMethods.txt`: `SHQueryUserNotificationState` 한 줄을 더한다. 생성기가
+        `PInvoke.SHQueryUserNotificationState(out QUERY_USER_NOTIFICATION_STATE)`(`HRESULT` 반환, namespace `Windows.Win32.UI.Shell`)를
+        만든다.
+      - `PopupController.cs`: `private static bool IsFullscreen()`를 추가한다. 반환된 `HRESULT`가 `Succeeded`이고 state가
+        `QUERY_USER_NOTIFICATION_STATE.QUNS_BUSY`, `QUNS_RUNNING_D3D_FULL_SCREEN`, `QUNS_PRESENTATION_MODE` 중 하나면 true다.
+        실패하면 HRESULT를 `Debug.WriteLine`으로 남기고 false다. 상수를 직접 정의하지 말고 생성된 enum을 쓴다(ADR-008).
+        `Evaluate`의 `isFullscreen: false`를 `IsFullscreen()`으로 바꾼다.
+        이유: Windows 알림과 같은 기준으로 판단한다(ARCHITECTURE "창과 셸 연동").
+      - 전체화면 여부는 `Decide`를 부를 때마다 조회한다. `WM_SETTINGCHANGE` 처리나 폴링 타이머를 추가하지 마라. 이유:
+        전체화면 시작·종료에는 알림이 없고, 판단은 `Decide`가 불리는 순간에만 필요하다.
+      - App에서 `settings.HideWhenFullscreen`을 보지 마라. 이유: 그 규칙은 Core에 있고 테스트돼 있다.
+      - QUNS_QUIET_TIME(6), QUNS_APP(7), QUNS_NOT_PRESENT(1)는 전체화면으로 보지 않는다. 방해 금지 모드 감지를 넣지 마라.
+        이유: 방해 금지를 감지할 공식 API는 아직 확인하지 않았다(ARCHITECTURE "구현 전에 확인할 것").
+      - 다른 파일, Core, 테스트를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(`dotnet run`, exe 실행,
+        패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가 시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/NativeMethods.txt
+      - src/Soriseom.App/PopupController.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s6-popup-animation
+    title: slide in and fade out the popup
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("2. 팝업 모양과 동작"), `src/Soriseom.App/PopupWindow.xaml.cs`(s2~s4),
+      `src/Soriseom.App/NativeMethods.txt`(s3에서 `SetLayeredWindowAttributes` 추가), `src/Soriseom.App/PopupController.cs`.
+
+      팝업이 미끄러지며 나타나고 페이드로 사라지게 한다(PRD 2). 공개 메서드(`ShowTrack`, `UpdateThumbnail`, `HidePopup`)의
+      시그니처와 `PopupController`의 호출 흐름은 바꾸지 않는다.
+
+      ## 동작
+      - 숨겨진 상태에서 `ShowTrack`: 최종 위치에서 세로로 24 DIP(s2와 같은 배율 적용)만큼 떨어진 곳에서 창 알파 0으로
+        시작해, 250ms 동안 최종 위치와 알파 255로 움직인다. `Top*` 위치는 위에서 내려오고 `Bottom*` 위치는 아래에서 올라온다.
+        이징은 ease-out cubic(`1 - (1 - t)^3`)을 위치와 알파에 함께 쓴다.
+      - 보이는 상태(표시 중이거나 페이드아웃 중)에서 `ShowTrack`: 진행 중인 애니메이션을 멈추고 최종 위치와 알파 255로 바로
+        맞춘다. 다시 미끄러지지 않는다. 이유: 표시 중 교체는 내용만 바꾼다(PRD 1).
+      - `HidePopup`: 200ms 동안 알파를 255에서 0으로 선형으로 줄인 뒤 `AppWindow.Hide()`하고 알파를 255로 되돌린다.
+        숨겨진 상태면 아무것도 하지 않는다.
+
+      ## 구현
+      - `DispatcherQueue.CreateTimer()`로 만든 타이머 하나(`IsRepeating = true`, Interval 16ms)로 두 애니메이션을 돌린다.
+        진행률은 `Stopwatch` 경과 시간으로 계산한다. 틱 횟수로 세지 마라. 이유: 타이머 간격은 보장되지 않는다.
+        끝나면 타이머를 멈춘다.
+      - 창 위치는 `AppWindow.Move`, 창 알파는
+        `PInvoke.SetLayeredWindowAttributes(hwnd, new COLORREF(0), alpha, LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA)`로 바꾼다.
+        이유: XAML 요소의 Opacity·Transform만 바꾸면 창 사각형은 그 자리에 남으므로 창 자체를 움직이고 창 알파를 바꾼다.
+        XAML Storyboard나 Composition 애니메이션을 쓰지 마라.
+      - "보이는 상태"는 직접 둔 필드로 판단한다. 페이드아웃이 끝나 `Hide()`한 뒤에만 숨겨진 상태가 된다.
+
+      ## 하지 말 것
+      - 애니메이션 시간·거리 설정 항목, 애니메이션 끄기 옵션을 추가하지 마라. 이유: docs/PRD.md에 없는 설정이다.
+      - Core, 테스트, `MediaSessionAdapter`를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(`dotnet run`,
+        exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가 시스템에 등록된다.
+      MSIX 생성 AC는 `src/Soriseom.App/AppPackages/`에 산출물을 만들며 이 경로는 `.gitignore`에 있다.
+    expected_files:
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - src/Soriseom.App/PopupController.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
