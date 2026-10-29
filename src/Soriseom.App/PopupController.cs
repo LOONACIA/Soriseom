@@ -60,6 +60,11 @@ internal sealed class PopupController
 
     private void Evaluate()
     {
+        if (_adapter.Current is { } snapshot)
+        {
+            _store.Update(_store.Current.WithAppSeen(snapshot.AppId));
+        }
+
         var settings = _store.Current;
         var now = DateTimeOffset.UtcNow;
         var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now);

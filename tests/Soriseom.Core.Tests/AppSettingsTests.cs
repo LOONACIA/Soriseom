@@ -117,4 +117,18 @@ public class AppSettingsTests
         Assert.False(updated.Apps["Player"]);
         Assert.True(updated.Apps["player"]);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void WithAppSeenIgnoresBlankAppId(string appId)
+    {
+        var original = new AppSettings();
+
+        var updated = original.WithAppSeen(appId);
+
+        Assert.Same(original, updated);
+        Assert.Empty(updated.Apps);
+    }
 }

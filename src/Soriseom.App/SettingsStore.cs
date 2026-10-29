@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using Soriseom.Core;
 using Windows.Storage;
@@ -9,11 +10,14 @@ internal sealed class SettingsStore
     private const string DisplaySecondsKey = "DisplaySeconds";
     private const string PositionKey = "Position";
     private const string HideWhenFullscreenKey = "HideWhenFullscreen";
+    private const string AppsContainerName = "Apps";
 
     public SettingsStore()
     {
         Current = Load();
     }
+
+    public event EventHandler? Changed;
 
     public AppSettings Current { get; private set; }
 
@@ -31,11 +35,18 @@ internal sealed class SettingsStore
             values[DisplaySecondsKey] = settings.DisplaySeconds;
             values[PositionKey] = settings.Position.ToString();
             values[HideWhenFullscreenKey] = settings.HideWhenFullscreen;
+            var appsValues = ApplicationData.Current.LocalSettings.CreateContainer(AppsContainerName, ApplicationDataCreateDisposition.Always).Values;
+            foreach (var (appId, enabled) in settings.Apps)
+            {
+                appsValues[appId] = enabled;
+            }
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
         }
+
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static AppSettings Load()
@@ -60,7 +71,17 @@ internal sealed class SettingsStore
                 settings = settings with { HideWhenFullscreen = hideWhenFullscreen };
             }
 
-            return settings;
+            var apps = ImmutableDictionary<string, bool>.Empty;
+            var appsValues = ApplicationData.Current.LocalSettings.CreateContainer(AppsContainerName, ApplicationDataCreateDisposition.Always).Values;
+            foreach (var (appId, value) in appsValues)
+            {
+                if (value is bool enabled)
+                {
+                    apps = apps.Add(appId, enabled);
+                }
+            }
+
+            return settings with { Apps = apps };
         }
         catch (Exception ex)
         {

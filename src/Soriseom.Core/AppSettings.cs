@@ -26,7 +26,7 @@ public sealed record AppSettings
 
     public bool IsAppEnabled(string appId) => !Apps.TryGetValue(appId, out bool enabled) || enabled;
 
-    public AppSettings WithAppSeen(string appId) => Apps.ContainsKey(appId)
+    public AppSettings WithAppSeen(string appId) => string.IsNullOrWhiteSpace(appId) || Apps.ContainsKey(appId)
         ? this
         : this with { Apps = Apps.Add(appId, true) };
 }

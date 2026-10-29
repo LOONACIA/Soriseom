@@ -97,6 +97,12 @@
   <data name="HideWhenFullscreenToggle.Header" xml:space="preserve">
     <value>Hide while an app is full screen</value>
   </data>
+  <data name="AppsHeader.Text" xml:space="preserve">
+    <value>Apps</value>
+  </data>
+  <data name="AppsDescription.Text" xml:space="preserve">
+    <value>Apps that have played media appear here. Track changes from apps that are turned off aren't shown.</value>
+  </data>
   <data name="TraySettings" xml:space="preserve">
     <value>Settings</value>
   </data>
