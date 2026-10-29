@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 
 namespace Soriseom.App;
@@ -8,6 +9,7 @@ namespace Soriseom.App;
 public partial class App : Application
 {
     private Window? _window;
+    private PopupController? _popupController;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="App"/> class.
@@ -23,9 +25,12 @@ public partial class App : Application
     /// Invoked when the application is launched.
     /// </summary>
     /// <param name="args">Details about the launch request and process.</param>
-    protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         _window = new MainWindow();
+        _window.Closed += (_, _) => Exit();
         _window.Activate();
+        _popupController = new PopupController(DispatcherQueue.GetForCurrentThread());
+        await _popupController.StartAsync();
     }
 }

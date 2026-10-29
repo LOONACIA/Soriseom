@@ -9,6 +9,7 @@
   - `Microsoft.WindowsAppSDK` (ADR-002)
   - `CommunityToolkit.Mvvm` (ADR-002)
   - `H.NotifyIcon.WinUI` (ADR-002)
+  - `Microsoft.Windows.CsWin32` (ADR-008)
   - `StyleCop.Analyzers` 1.3 이상 (ADR-006)
   - 테스트용: `xunit.v3`, `xunit.runner.visualstudio`, `Microsoft.NET.Test.Sdk` (ADR-004)
   - 위 패키지를 만들 때 템플릿이 자동으로 함께 추가하는 패키지
@@ -80,3 +81,12 @@
 - **이유**: 태그를 올리는 것 자체가 출시 결정이므로 수작업을 줄입니다.
 - **트레이드오프**: 잘못 올린 태그도 인증만 통과하면 게시됩니다. Entra ID 자격 증명을 관리해야 합니다. 최초 제출은 Partner Center에서 직접 해야 할 수 있습니다.
 - **하네스에 미치는 영향**: 자격 증명과 패키지 식별 정보를 워크플로나 저장소에 하드코딩하지 마세요. GitHub Secrets만 씁니다.
+
+### ADR-008: Win32 P/Invoke는 CsWin32로 생성한다
+
+- **상태**: 채택
+- **결정**: App에서 Win32 API(창 확장 스타일, DWM, DPI, 셸 알림 상태)를 부를 때는 `Microsoft.Windows.CsWin32` 소스 생성기를 씁니다. 필요한 API 이름을 `src/Soriseom.App/NativeMethods.txt`에 적고, 생성된 `Windows.Win32.PInvoke`와 타입(`HWND`, `HRESULT`, enum)을 씁니다.
+- **이유**: App 코드는 빌드와 수동 확인으로만 검증하므로(ADR-004) 손으로 쓴 시그니처가 틀리면 실행해야 드러납니다. CsWin32는 공식 Win32 메타데이터에서 CPU 아키텍처별로 맞는 선언과 상수를 만듭니다. 개발 의존성이라 앱에 런타임 의존성을 더하지 않습니다.
+- **검토한 대안**: `[LibraryImport]` 직접 선언(의존성은 없지만 시그니처와 상수를 손으로 관리하고, Win32 상수 이름을 StyleCop 규칙에 맞게 바꿔야 함)
+- **트레이드오프**: 0.x 버전이고, 빌드할 때 함께 받는 메타데이터 패키지(`Microsoft.Windows.SDK.Win32Metadata` 등)는 preview/experimental입니다. 생성 코드가 저장소에 없어 리뷰할 때 시그니처를 diff로 볼 수 없습니다. 2026-10-29에 0.3.330이 이 저장소 설정(경고=오류, StyleCop, x64·x86·ARM64)에서 경고 없이 빌드되는 것을 확인했습니다.
+- **하네스에 미치는 영향**: `[DllImport]`나 `[LibraryImport]`로 Win32 함수를 직접 선언하지 마세요. 필요한 API는 `NativeMethods.txt`에 이름을 추가하세요. Win32 상수를 직접 정의하지 말고 생성된 enum과 상수를 쓰세요.
