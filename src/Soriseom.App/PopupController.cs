@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Soriseom.Core;
 using Windows.Storage.Streams;
+using Windows.Win32;
+using Windows.Win32.UI.Shell;
 
 namespace Soriseom.App;
 
@@ -41,10 +44,24 @@ internal sealed class PopupController
         Evaluate();
     }
 
+    private static bool IsFullscreen()
+    {
+        var result = PInvoke.SHQueryUserNotificationState(out QUERY_USER_NOTIFICATION_STATE state);
+        if (result.Succeeded)
+        {
+            return state is QUERY_USER_NOTIFICATION_STATE.QUNS_BUSY
+                or QUERY_USER_NOTIFICATION_STATE.QUNS_RUNNING_D3D_FULL_SCREEN
+                or QUERY_USER_NOTIFICATION_STATE.QUNS_PRESENTATION_MODE;
+        }
+
+        Debug.WriteLine($"SHQueryUserNotificationState failed: {result}");
+        return false;
+    }
+
     private void Evaluate()
     {
         var now = DateTimeOffset.UtcNow;
-        var decision = _decider.Decide(_adapter.Current, _settings, isFullscreen: false, now);
+        var decision = _decider.Decide(_adapter.Current, _settings, isFullscreen: IsFullscreen(), now);
         _reevaluateTimer.Stop();
         if (decision.ReevaluateAt is { } reevaluateAt)
         {
