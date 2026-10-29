@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -20,11 +21,26 @@ public sealed partial class PopupWindow : Window
     private const int WidthDip = 360;
     private const int HeightDip = 80;
     private const int MarginDip = 16;
+    private readonly DispatcherQueueTimer _animationTimer;
+    private readonly Stopwatch _animationStopwatch = new();
+    private PointInt32 _finalPosition;
+    private int _slideOffset;
+    private bool _isVisible;
+    private bool _isFadingOut;
     private long _thumbnailVersion;
 
     public unsafe PopupWindow()
     {
         InitializeComponent();
+        _animationTimer = DispatcherQueue.CreateTimer();
+        _animationTimer.IsRepeating = true;
+        _animationTimer.Interval = TimeSpan.FromMilliseconds(16);
+        _animationTimer.Tick += (_, _) => Animate();
+        Closed += (_, _) =>
+        {
+            _animationTimer.Stop();
+            _animationStopwatch.Stop();
+        };
         AlbumArtBrush.ImageFailed += (_, args) =>
         {
             Debug.WriteLine(args.ErrorMessage);
@@ -65,8 +81,35 @@ public sealed partial class PopupWindow : Window
         int margin = (int)Math.Round(MarginDip * scale);
         var bounds = PopupPlacement.Compute(position, new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height), width, height, margin);
 
-        AppWindow.Move(new PointInt32(workArea.X, workArea.Y));
+        _animationTimer.Stop();
+        _animationStopwatch.Reset();
+        _finalPosition = new PointInt32(bounds.X, bounds.Y);
+        if (!_isVisible)
+        {
+            SetAlpha(0);
+            AppWindow.Move(new PointInt32(workArea.X, workArea.Y));
+        }
+
         AppWindow.MoveAndResize(new RectInt32(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+        if (_isVisible)
+        {
+            SetAlpha(255);
+        }
+        else
+        {
+            _slideOffset = (int)Math.Round(24 * scale);
+            if (position is PopupPosition.TopLeft or PopupPosition.TopCenter or PopupPosition.TopRight)
+            {
+                _slideOffset = -_slideOffset;
+            }
+
+            AppWindow.Move(new PointInt32(_finalPosition.X, _finalPosition.Y + _slideOffset));
+            _isFadingOut = false;
+            _animationStopwatch.Restart();
+            _animationTimer.Start();
+        }
+
+        _isVisible = true;
         AppWindow.Show(false);
         _ = LoadThumbnailAsync(thumbnail);
     }
@@ -78,7 +121,55 @@ public sealed partial class PopupWindow : Window
 
     public void HidePopup()
     {
-        AppWindow.Hide();
+        if (!_isVisible)
+        {
+            return;
+        }
+
+        _animationTimer.Stop();
+        _isFadingOut = true;
+        SetAlpha(255);
+        _animationStopwatch.Restart();
+        _animationTimer.Start();
+    }
+
+    private void Animate()
+    {
+        if (!_animationTimer.IsRunning)
+        {
+            return;
+        }
+
+        double duration = _isFadingOut ? 200 : 250;
+        double progress = Math.Min(_animationStopwatch.Elapsed.TotalMilliseconds / duration, 1);
+        if (_isFadingOut)
+        {
+            SetAlpha((byte)Math.Round(255 * (1 - progress)));
+        }
+        else
+        {
+            double eased = 1 - Math.Pow(1 - progress, 3);
+            AppWindow.Move(new PointInt32(_finalPosition.X, _finalPosition.Y + (int)Math.Round(_slideOffset * (1 - eased))));
+            SetAlpha((byte)Math.Round(255 * eased));
+        }
+
+        if (progress >= 1)
+        {
+            _animationTimer.Stop();
+            _animationStopwatch.Stop();
+            if (_isFadingOut)
+            {
+                AppWindow.Hide();
+                _isVisible = false;
+                SetAlpha(255);
+            }
+        }
+    }
+
+    private void SetAlpha(byte alpha)
+    {
+        var hwnd = new HWND(Win32Interop.GetWindowFromWindowId(AppWindow.Id));
+        PInvoke.SetLayeredWindowAttributes(hwnd, new COLORREF(0), alpha, LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA);
     }
 
     private async Task LoadThumbnailAsync(IRandomAccessStreamReference? thumbnail)
