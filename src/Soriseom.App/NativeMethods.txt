@@ -7,3 +7,4 @@ SetLayeredWindowAttributes
 DwmSetWindowAttribute
 DWM_WINDOW_CORNER_PREFERENCE
 SHQueryUserNotificationState
+AllowSetForegroundWindow
