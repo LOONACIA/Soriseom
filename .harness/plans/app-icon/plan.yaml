@@ -1,0 +1,208 @@
+id: app-icon
+goal: >
+  docs/PRD.md "출시 준비"의 앱 아이콘 초안을 끝낸다. 사용자가 고른 둥근 사각 아이콘(청록-파랑 그라데이션 위에 흰 음표와 섬)과 트레이용 단색
+  글리프를 SVG 원본으로 저장소에 두고, 스크립트로 패키지 로고 PNG와 ICO를 만들어 템플릿 이미지를 모두 대체한다. 설정 창 제목 표시줄은 새 앱
+  아이콘을 쓰고, 트레이는 생성 아이콘 대신 작업 표시줄 테마에 맞는 글리프를 보여준다. 완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트,
+  포맷 검사), 로컬 MSIX 생성, `uv run tools/icons/render_icons.py --check`가 통과하는 상태다. Partner Center에 올리는 Store 게시 이미지(1:1
+  Box art 등), Store 등록 문구, Release 빌드, CI는 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-app-icon-assets
+    title: replace template logos with the soriseom icon
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어", "주의"), docs/PRD.md("출시 준비"), docs/ADR.md(원칙, ADR-003, ADR-009),
+      docs/ARCHITECTURE.md("디렉토리 구조"), `src/Soriseom.App/Soriseom.App.csproj`, `src/Soriseom.App/Package.appxmanifest`,
+      `src/Soriseom.App/SettingsWindow.xaml.cs`.
+
+      목표: `src/Soriseom.App/Assets/`의 템플릿 이미지를 새 아이콘으로 모두 바꾼다. 원본 SVG와 생성 스크립트를 `tools/icons/`에 두고, 생성한
+      PNG와 ICO를 커밋 대상으로 남긴다. 설정 창 제목 표시줄은 새 앱 아이콘을 쓴다.
+
+      ## 1. SVG 원본
+      아래 두 파일을 글자 그대로 만든다. 도형, 색, 좌표를 고치지 마라. 이유: 사용자가 비교 이미지를 보고 고른 디자인이다.
+
+      `tools/icons/app-icon.svg`:
+      ```xml
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+        <defs>
+          <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#14B8A6"/><stop offset="1" stop-color="#1D4ED8"/>
+          </linearGradient>
+        </defs>
+        <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#plate)"/>
+        <g fill="#FFFFFF">
+          <path d="M40 216 C 72 176, 184 176, 216 216 Z"/>
+          <ellipse cx="110" cy="148" rx="28" ry="21" transform="rotate(-20 110 148)"/>
+          <rect x="124" y="40" width="12" height="108"/>
+          <path d="M124 40 H136 C 140 66, 186 76, 178 124 C 172 102, 152 90, 136 86 Z"/>
+        </g>
+      </svg>
+      ```
+
+      `tools/icons/tray-icon.svg`:
+      ```xml
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+        <g fill="#FFFFFF">
+          <path d="M2 30 C 7 24, 25 24, 30 30 Z"/>
+          <ellipse cx="13" cy="19" rx="5" ry="3.6" transform="rotate(-20 13 19)"/>
+          <rect x="16" y="2" width="2.4" height="17"/>
+          <path d="M16 2 H18.4 C 19 6.5, 26 8, 24.6 16 C 23.8 13, 21 11, 18.4 10.4 Z"/>
+        </g>
+      </svg>
+      ```
+
+      ## 2. `tools/icons/render_icons.py`
+      `uv run`으로 실행하는 단일 파일 스크립트다. 맨 앞에 PEP 723 메타데이터를 넣고 버전을 고정한다.
+      ```python
+      # /// script
+      # requires-python = ">=3.12"
+      # dependencies = ["resvg-py==0.5.0", "pillow==13.0.0"]
+      # ///
+      ```
+      - 경로는 스크립트 파일 위치(`Path(__file__)`) 기준으로 잡는다. 현재 디렉토리에 의존하지 마라. 출력 폴더는 `src/Soriseom.App/Assets`다.
+      - SVG 렌더링: `Image.open(io.BytesIO(bytes(resvg_py.svg_to_bytes(svg_string=svg, width=size, height=size)))).convert("RGBA")`.
+        작은 크기를 큰 PNG에서 줄이지 말고 크기마다 SVG에서 새로 렌더링한다. 이유: 16px에서 선명도가 달라진다.
+      - 시그니처: `build_assets() -> dict[str, bytes]`(파일 이름 → 내용)와 `main() -> int`. `build_assets`가 아래 표의 파일 33개를 메모리에 만든다.
+      - 인자 없이 실행하면 `build_assets()`의 결과를 출력 폴더에 쓴다.
+      - `--check`로 실행하면 아무것도 쓰지 않고 출력 폴더와 비교한다. 없는 파일, 내용이 다른 파일, 표에 없는 파일(`*.png`, `*.ico`)을 모두 출력하고
+        하나라도 있으면 종료 코드 1, 없으면 0으로 끝난다. 이유: 이 검사가 인수 조건이며, 템플릿 이미지가 남아 있으면 실패해야 한다.
+
+      파일 표. "전체"는 SVG를 그 크기 그대로 렌더링한다는 뜻이다. "가운데"는 투명 캔버스 가운데에 앱 아이콘을 지정한 변 길이로 렌더링해
+      `alpha_composite`로 올린다는 뜻이다(`round()`로 반올림, 좌표는 `(캔버스 - 변) // 2`).
+      | 파일 | 픽셀 | 내용 |
+      |---|---|---|
+      | `Square44x44Logo.scale-{100,125,150,200,400}.png` | 44, 55, 66, 88, 176 | 앱 아이콘 전체 |
+      | `Square44x44Logo.targetsize-{16,24,32,48,256}_altform-unplated.png` | 이름의 크기 | 앱 아이콘 전체 |
+      | `Square150x150Logo.scale-{100,125,150,200,400}.png` | 150, 188, 225, 300, 600 | 앱 아이콘 가운데, 변 = 캔버스 변 × 0.66 |
+      | `Wide310x150Logo.scale-{100,125,150,200,400}.png` | 310×150, 388×188, 465×225, 620×300, 1240×600 | 앱 아이콘 가운데, 변 = 캔버스 높이 × 0.6 |
+      | `SplashScreen.scale-{100,125,150,200,400}.png` | 620×300, 775×375, 930×450, 1240×600, 2480×1200 | 앱 아이콘 가운데, 변 = 캔버스 높이 × 0.6 |
+      | `StoreLogo.scale-{100,125,150,200,400}.png` | 50, 63, 75, 100, 200 | 앱 아이콘 전체 |
+      | `AppIcon.ico` | 16, 20, 24, 32, 40, 48, 64, 256 | 앱 아이콘 |
+      | `TrayIconForDarkTaskbar.ico` | 16, 20, 24, 32, 40, 48 | 트레이 글리프 그대로(흰색) |
+      | `TrayIconForLightTaskbar.ico` | 16, 20, 24, 32, 40, 48 | 트레이 SVG 문자열의 `#FFFFFF`를 `#1B1B1B`로 바꿔 렌더링 |
+
+      ICO는 크기마다 렌더링한 이미지를 다음처럼 저장한다. 맨 큰 프레임이 기준 이미지다.
+      `frames[-1].save(buffer, format="ICO", sizes=[(s, s) for s in sizes], append_images=frames[:-1], bitmap_format="bmp")`
+      `bitmap_format="bmp"`을 빼지 마라. 이유: 2026-11-04에 이 방식의 ICO가 `System.Drawing.Icon`(H.NotifyIcon이 쓰는 경로)에서 16~48px 모두 요청한
+      크기로 열리고 투명도가 유지되는 것을 확인했다.
+
+      파일 이름에 `theme-dark`, `theme-light` 같은 한정자를 쓰지 마라. 이유: MRT가 앱 테마로 해석하는데, 트레이는 앱 테마가 아니라 작업 표시줄 테마를
+      따른다. 트레이 코드는 다음 스텝에서 만든다.
+
+      `Square44x44Logo.targetsize-*` 일반 변형(altform 없음)과 `Square71x71`, `Square310x310`, `BadgeLogo`를 만들지 마라. 이유: 같은 그림의 중복이거나
+      매니페스트가 참조하지 않는다.
+
+      ## 3. 에셋 교체
+      스크립트를 실행해 파일을 만든다. 표에 없는 템플릿 파일 `src/Soriseom.App/Assets/LockScreenLogo.scale-200.png`와
+      `src/Soriseom.App/Assets/StoreLogo.png`는 그 두 파일만 지정해 삭제한다. 폴더를 통째로 지우거나 와일드카드로 지우지 마라. 이유: LockScreenLogo는
+      매니페스트가 참조하지 않고, StoreLogo는 `StoreLogo.scale-*`가 대신한다.
+
+      ## 4. `src/Soriseom.App/Soriseom.App.csproj`
+      `Assets\...`를 나열한 `<Content Include>` 7줄을 `<Content Include="Assets\*" />` 한 줄로 바꾼다. 다른 줄은 고치지 마라. 2026-11-04에 임시 복사본에서
+      이 방식으로 에셋 33개가 번들의 메인 패키지와 scale 리소스 패키지에 모두 들어가는 것을 확인했다.
+      `Package.appxmanifest`는 고치지 마라. 이유: 기존 `Assets\Square44x44Logo.png` 같은 경로를 MRT가 scale 변형으로 찾아 준다.
+
+      ## 5. `src/Soriseom.App/SettingsWindow.xaml.cs`
+      생성자에서 `Title = ...` 바로 다음 줄에 다음을 추가한다.
+      `AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));`
+
+      ## 6. 문서
+      - docs/ARCHITECTURE.md "디렉토리 구조"의 `tools/` 아래에 `icons/` 줄을 `smoke/` 앞에 넣는다. 설명: 앱·트레이 아이콘 SVG 원본과 에셋 생성 스크립트(uv로
+        실행, 앱에 포함되지 않음). 트리 기호는 `├──`와 `└──`를 맞춘다. 다른 절은 고치지 마라.
+      - CLAUDE.md "그 밖의 명령" 표에 두 줄을 추가한다. `아이콘 에셋 다시 생성 | uv run tools/icons/render_icons.py`,
+        `아이콘 에셋 최신 여부 검사 | uv run tools/icons/render_icons.py --check`. 기존 줄과 같이 명령은 백틱으로 묶는다.
+      - 표의 PNG와 ICO는 SVG를 고친 뒤 스크립트로 다시 만들며 직접 고치지 않는다는 내용을 `render_icons.py` 맨 위 docstring에 영어로 적는다.
+
+      `src/Soriseom.App/TrayController.cs`를 고치지 마라. 이유: 트레이 아이콘 전환은 다음 스텝에서 한다. docs/PRD.md와 docs/ADR.md도 고치지 마라. 이유: 다음
+      스텝에서 함께 고친다. 앱을 실행하지 마라(CLAUDE.md "주의"). NuGet 패키지를 추가하지 마라. 이유: 렌더링 의존성은 uv 스크립트 안에만 두고 앱에는 들어가지 않는다.
+    expected_files:
+      - tools/icons/app-icon.svg
+      - tools/icons/tray-icon.svg
+      - tools/icons/render_icons.py
+      - src/Soriseom.App/Assets/*
+      - src/Soriseom.App/Soriseom.App.csproj
+      - src/Soriseom.App/SettingsWindow.xaml.cs
+      - docs/ARCHITECTURE.md
+      - CLAUDE.md
+    ac:
+      - 'uv run tools/icons/render_icons.py --check'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-tray-icon-theme
+    title: switch the tray icon with the taskbar theme
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("구조 규칙", "주의"), docs/PRD.md("5. 상주", "출시 준비"), docs/ARCHITECTURE.md("창과 셸 연동 (App)", "횡단 관심사"의 에러 처리),
+      docs/ADR.md(ADR-002, ADR-009), `src/Soriseom.App/TrayController.cs`, `src/Soriseom.App/App.xaml.cs`, `tools/smoke/Smoke.ps1`(`Save-Screenshot`, `Test-Tray`).
+      이전 스텝이 `src/Soriseom.App/Assets/TrayIconForDarkTaskbar.ico`와 `TrayIconForLightTaskbar.ico`를 만들었다.
+
+      목표: 트레이 아이콘이 `GeneratedIconSource` 대신 새 글리프를 보여주고, 작업 표시줄이 밝으면 어두운 글리프, 어두우면 흰 글리프를 쓴다. 앱이 실행 중일 때
+      테마가 바뀌면 아이콘도 바뀐다.
+
+      ## 1. `src/Soriseom.App/TrayController.cs`
+      - 필드: `DispatcherQueue _dispatcherQueue = DispatcherQueue.GetForCurrentThread()`, `UISettings _uiSettings = new()`(`Windows.UI.ViewManagement`), `bool _isTaskbarLight`.
+        `UISettings`는 지역 변수로 두지 마라. 이유: 수집되면 이벤트가 더 오지 않는다.
+      - `private static bool IsTaskbarLight()`: `Registry.CurrentUser`에서 `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`를 열어 DWORD
+        `SystemUsesLightTheme`가 0이 아닌 `int`이면 true를 돌려준다. 키나 값이 없으면 false다. 이유: 그 값이 없는 Windows 10 버전의 작업 표시줄은 항상 어둡다.
+        예외는 잡아서 `Debug.WriteLine`에 남기고 false를 돌려준다(ARCHITECTURE "에러 처리").
+        `AppsUseLightTheme`, `Application.RequestedTheme`, `ActualTheme`를 쓰지 마라. 이유: 앱 모드와 Windows 모드를 따로 고르면 작업 표시줄 테마와 다르다.
+      - `private static BitmapImage CreateIcon(bool isTaskbarLight)`: 밝으면 `ms-appx:///Assets/TrayIconForLightTaskbar.ico`, 어두우면
+        `ms-appx:///Assets/TrayIconForDarkTaskbar.ico`로 `new BitmapImage(new Uri(...))`를 돌려준다.
+      - 생성자: `_isTaskbarLight = IsTaskbarLight();`로 읽고 `IconSource = CreateIcon(_isTaskbarLight)`로 지정한다. `GeneratedIconSource` 초기화 블록은 지운다.
+        `ForceCreate` 다음에 `_uiSettings.ColorValuesChanged += OnColorValuesChanged;`로 구독한다.
+      - `private void OnColorValuesChanged(UISettings sender, object args)`: `_dispatcherQueue.TryEnqueue(UpdateIcon);`만 부른다. 이유: 이 이벤트는 UI 스레드가 아닌
+        곳에서 오는데 `IconSource`는 UI 스레드에서 바꿔야 한다.
+      - `private void UpdateIcon()`: `IsTaskbarLight()`가 `_isTaskbarLight`와 다를 때만 필드를 고치고 `_taskbarIcon.IconSource`를 바꾼다. 이유: 이 이벤트는 강조색처럼
+        관계없는 변경에도 온다.
+      - `Dispose`: 이벤트를 먼저 해제한 뒤 `_taskbarIcon.Dispose()`를 부른다.
+      - 더 쓰지 않는 `using Microsoft.UI;`와 `using Microsoft.UI.Xaml.Media;`를 지우고 필요한 using만 더한다. `ToolTipText`, 메뉴, `LeftClickCommand`, `ForceCreate`의
+        try/catch는 그대로 둔다.
+
+      이 판단은 Core로 옮기지 마라. 이유: 값 하나를 읽어 파일을 고르는 셸 연동이고, Core는 레지스트리를 참조할 수 없다.
+
+      ## 2. `tools/smoke/Smoke.ps1`
+      사람이 아니라 Claude가 트레이 아이콘 모양을 확인할 수 있게 스크린샷을 추가한다. `Save-Screenshot` 바로 다음에 함수를 넣는다.
+      ```powershell
+      # A tray icon has no window of its own, so its rectangle is copied from the screen.
+      function Save-ElementScreenshot($Element, [string] $Name) {
+          $bounds = $Element.Current.BoundingRectangle
+          $bitmap = [System.Drawing.Bitmap]::new([int]$bounds.Width, [int]$bounds.Height)
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen([int]$bounds.X, [int]$bounds.Y, 0, 0, $bitmap.Size)
+          $graphics.Dispose()
+          $path = Join-Path $OutDir "$Name.png"
+          $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+          $bitmap.Dispose()
+          Write-Line "screenshot $path"
+      }
+      ```
+      `Test-Tray`에서 `$icon.GetCurrentPattern($InvokePattern).Invoke()` 바로 앞 줄에 `Save-ElementScreenshot $icon 'tray-icon'`을 넣는다. 다른 시나리오와 판정은 고치지 마라.
+      이 파일은 파일 편집 도구로만 고치고 실행하지 마라. 이유: `.codex/hooks/guard.py`가 `tools/smoke/` 경로가 들어간 셸 명령을 막고, 스모크는 계획 마무리 때 Claude가 돌린다.
+
+      ## 3. 문서
+      - docs/ARCHITECTURE.md "창과 셸 연동 (App)"의 **트레이** 항목 끝에 다음 내용을 더한다: 아이콘은 작업 표시줄 테마(`SystemUsesLightTheme`)를 따르며 앱 테마와 다를 수 있다.
+        실행 중 변경은 `UISettings.ColorValuesChanged`로 감지한다.
+      - docs/ADR.md ADR-009 "스크립트가 못 보는 항목" 목록에 추가한다: "작업 표시줄 테마 전환: Windows 모드를 바꾸면 화면 전체가 바뀌므로 스크립트가 건드리지 않습니다.
+        설정에서 Windows 모드를 바꿨을 때 트레이 아이콘이 따라 바뀌는지 사람이 확인합니다."
+      - docs/PRD.md "출시 준비"의 Claude 목록에서 앱 아이콘 초안 항목을 `- [x]`로 바꾼다. 다른 항목은 고치지 마라.
+
+      `tools/icons/`와 `src/Soriseom.App/Assets/`를 고치지 마라. 이유: 이전 스텝에서 끝났고 `--check`로 고정돼 있다. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라.
+    expected_files:
+      - src/Soriseom.App/TrayController.cs
+      - tools/smoke/Smoke.ps1
+      - docs/ARCHITECTURE.md
+      - docs/ADR.md
+      - docs/PRD.md
+    ac:
+      - 'uv run tools/icons/render_icons.py --check'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
