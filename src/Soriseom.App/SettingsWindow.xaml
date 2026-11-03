@@ -22,6 +22,7 @@
             </StackPanel.Resources>
             <TextBlock
                 x:Uid="SettingsHeader"
+                AutomationProperties.AutomationId="SettingsHeader"
                 Style="{StaticResource TitleTextBlockStyle}"
                 Margin="0,0,0,12" />
             <Border Style="{StaticResource SettingsCardStyle}">
@@ -56,10 +57,12 @@
                 <StackPanel Spacing="4">
                     <ToggleSwitch
                         x:Uid="LaunchAtStartupToggle"
+                        AutomationProperties.AutomationId="LaunchAtStartupToggle"
                         IsOn="{x:Bind ViewModel.LaunchAtStartup, Mode=TwoWay}"
                         IsEnabled="{x:Bind ViewModel.CanChangeLaunchAtStartup, Mode=OneWay}" />
                     <TextBlock
                         x:Uid="LaunchAtStartupNotice"
+                        AutomationProperties.AutomationId="LaunchAtStartupNotice"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"
@@ -70,13 +73,15 @@
                 <StackPanel Spacing="4">
                     <ComboBox
                         x:Uid="LanguageComboBox"
+                        AutomationProperties.AutomationId="LanguageComboBox"
                         SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
-                        <ComboBoxItem x:Uid="LanguageSystem" />
-                        <ComboBoxItem x:Uid="LanguageKorean" />
-                        <ComboBoxItem x:Uid="LanguageEnglish" />
+                        <ComboBoxItem x:Uid="LanguageSystem" AutomationProperties.AutomationId="LanguageSystem" />
+                        <ComboBoxItem x:Uid="LanguageKorean" AutomationProperties.AutomationId="LanguageKorean" />
+                        <ComboBoxItem x:Uid="LanguageEnglish" AutomationProperties.AutomationId="LanguageEnglish" />
                     </ComboBox>
                     <TextBlock
                         x:Uid="LanguageRestartNotice"
+                        AutomationProperties.AutomationId="LanguageRestartNotice"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"
@@ -100,6 +105,7 @@
                     <DataTemplate x:DataType="local:AppToggleViewModel">
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <ToggleSwitch
+                                AutomationProperties.AutomationId="{x:Bind AppId}"
                                 Header="{x:Bind DisplayName}"
                                 IsOn="{x:Bind IsEnabled, Mode=TwoWay}" />
                         </Border>
