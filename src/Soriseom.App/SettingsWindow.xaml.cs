@@ -24,6 +24,14 @@ public sealed partial class SettingsWindow : Window
         double scale = dpi == 0 ? 1.0 : dpi / 96.0;
         AppWindow.Resize(new SizeInt32((int)Math.Round(WidthDip * scale), (int)Math.Round(HeightDip * scale)));
 
+        Activated += (sender, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+            {
+                _ = ViewModel.RefreshLaunchAtStartupAsync();
+            }
+        };
+
         AppWindow.Closing += (sender, args) =>
         {
             args.Cancel = true;

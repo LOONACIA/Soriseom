@@ -97,6 +97,12 @@
   <data name="HideWhenFullscreenToggle.Header" xml:space="preserve">
     <value>Hide while an app is full screen</value>
   </data>
+  <data name="LaunchAtStartupToggle.Header" xml:space="preserve">
+    <value>Start when I sign in</value>
+  </data>
+  <data name="LaunchAtStartupNotice.Text" xml:space="preserve">
+    <value>Windows manages this setting. You can change it in Settings &gt; Apps &gt; Startup or on the Startup apps tab in Task Manager.</value>
+  </data>
   <data name="AppsHeader.Text" xml:space="preserve">
     <value>Apps</value>
   </data>

@@ -52,6 +52,20 @@
                     x:Uid="HideWhenFullscreenToggle"
                     IsOn="{x:Bind ViewModel.HideWhenFullscreen, Mode=TwoWay}" />
             </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <StackPanel Spacing="4">
+                    <ToggleSwitch
+                        x:Uid="LaunchAtStartupToggle"
+                        IsOn="{x:Bind ViewModel.LaunchAtStartup, Mode=TwoWay}"
+                        IsEnabled="{x:Bind ViewModel.CanChangeLaunchAtStartup, Mode=OneWay}" />
+                    <TextBlock
+                        x:Uid="LaunchAtStartupNotice"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind ViewModel.ShowStartupNotice, Mode=OneWay}" />
+                </StackPanel>
+            </Border>
             <TextBlock
                 x:Uid="AppsHeader"
                 Style="{StaticResource BodyStrongTextBlockStyle}"

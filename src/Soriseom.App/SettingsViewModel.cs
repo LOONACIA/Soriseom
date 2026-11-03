@@ -1,12 +1,14 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Soriseom.Core;
+using Windows.ApplicationModel;
 
 namespace Soriseom.App;
 
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly SettingsStore _store;
+    private bool _isApplyingStartupState;
 
     internal SettingsViewModel(SettingsStore store)
     {
@@ -37,6 +39,20 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool HideWhenFullscreen { get; set; }
 
+    [ObservableProperty]
+    public partial bool LaunchAtStartup { get; set; }
+
+    [ObservableProperty]
+    public partial bool CanChangeLaunchAtStartup { get; set; }
+
+    [ObservableProperty]
+    public partial bool ShowStartupNotice { get; set; }
+
+    public async Task RefreshLaunchAtStartupAsync()
+    {
+        ApplyStartupState(await StartupRegistration.GetStateAsync());
+    }
+
     partial void OnDisplaySecondsChanged(double value)
     {
         _store.Update(_store.Current with { DisplaySeconds = (int)Math.Round(value) });
@@ -54,6 +70,30 @@ public sealed partial class SettingsViewModel : ObservableObject
     partial void OnHideWhenFullscreenChanged(bool value)
     {
         _store.Update(_store.Current with { HideWhenFullscreen = value });
+    }
+
+    partial void OnLaunchAtStartupChanged(bool value)
+    {
+        if (_isApplyingStartupState)
+        {
+            return;
+        }
+
+        _ = SetLaunchAtStartupAsync(value);
+    }
+
+    private void ApplyStartupState(StartupTaskState? state)
+    {
+        _isApplyingStartupState = true;
+        LaunchAtStartup = state is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
+        CanChangeLaunchAtStartup = state is StartupTaskState.Enabled or StartupTaskState.Disabled;
+        ShowStartupNotice = !CanChangeLaunchAtStartup;
+        _isApplyingStartupState = false;
+    }
+
+    private async Task SetLaunchAtStartupAsync(bool enabled)
+    {
+        ApplyStartupState(await StartupRegistration.SetEnabledAsync(enabled));
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)
