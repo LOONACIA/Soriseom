@@ -18,6 +18,7 @@ public sealed partial class SettingsWindow : Window
         ViewModel = new SettingsViewModel(store);
         InitializeComponent();
         Title = new ResourceLoader().GetString("SettingsWindowTitle");
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
 
         var hwnd = new HWND(Win32Interop.GetWindowFromWindowId(AppWindow.Id));
         uint dpi = PInvoke.GetDpiForWindow(hwnd);

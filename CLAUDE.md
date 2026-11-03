@@ -41,6 +41,8 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 | 테스트 메서드 하나 | `dotnet test --project tests/Soriseom.Core.Tests --filter-method "*.<클래스>.<메서드>"` |
 | 테스트 클래스 하나 | `dotnet test --project tests/Soriseom.Core.Tests --filter-class "Soriseom.Core.Tests.<클래스>"` |
 | 포맷 자동 수정 | `dotnet format Soriseom.slnx` |
+| 아이콘 에셋 다시 생성 | `uv run tools/icons/render_icons.py` |
+| 아이콘 에셋 최신 여부 검사 | `uv run tools/icons/render_icons.py --check` |
 | NuGet 패키지 추가 | `dotnet add <프로젝트 경로> package <패키지> --version <버전>` |
 | 취약 패키지 점검 | `dotnet package list --project Soriseom.slnx --vulnerable` |
 | 로컬 MSIX 생성(Debug, 서명 없음) | `dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
