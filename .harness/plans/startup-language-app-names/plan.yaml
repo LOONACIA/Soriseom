@@ -1,0 +1,318 @@
+id: startup-language-app-names
+goal: >
+  docs/PRD.md 4·5·6절에 남은 항목을 끝낸다. 앱은 기본으로 로그인 시 자동 실행되고 설정 창에서 끄고 켤 수 있으며, 자동 실행으로
+  시작하면 창 없이 트레이에만 있고 그 외 실행은 설정 창을 연다. 설정 창에서 언어(시스템/한국어/English)를 고르면 저장되고 앱을
+  다시 실행해야 적용된다고 안내한다. 앱별 켜기/끄기 목록은 앱 ID 대신 표시 이름을 보여주고, 이름을 찾지 못하면 앱 ID를 보여준다.
+  완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 로컬 MSIX 생성이 통과하고, 사람이 Visual Studio에서 위 동작을
+  수동으로 확인할 수 있는 상태다. Acrylic, 방해 금지 감지, 정식 앱·트레이 아이콘, CI, Release 빌드, Store 제출은 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-start-at-sign-in
+    title: start at sign-in without opening a window
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "주의", "구조 규칙"), docs/PRD.md("4. 설정 창"의 자동 실행 행, "5. 상주"),
+      docs/ARCHITECTURE.md("창과 셸 연동 (App)"의 자동 실행), docs/ADR.md(ADR-003), `src/Soriseom.App/Package.appxmanifest`,
+      `src/Soriseom.App/App.xaml.cs`, `src/Soriseom.Core/AppSettings.cs`, `tests/Soriseom.Core.Tests/AppSettingsTests.cs`.
+
+      목표: 앱을 한 번 실행한 뒤로는 Windows에 로그인할 때 앱이 자동으로 시작된다. 자동 실행으로 시작하면 설정 창을 열지 않고 트레이와
+      곡 변경 팝업만 동작한다. 그 밖의 실행은 지금처럼 설정 창을 연다(PRD 5). 설정 창의 켜기/끄기 항목은 다음 스텝(s2)에서 만드니
+      지금 넣지 마라.
+
+      ## 1. `Package.appxmanifest`
+      - 루트 `Package`에 `xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"`를 더하고 `IgnorableNamespaces`를
+        `"uap uap5 rescap"`로 바꾼다.
+      - `Application` 안, `uap:VisualElements` 바로 뒤에 다음을 넣는다.
+        ```xml
+        <Extensions>
+          <uap5:Extension
+            Category="windows.startupTask"
+            Executable="Soriseom.App.exe"
+            EntryPoint="Windows.FullTrustApplication">
+            <uap5:StartupTask
+              TaskId="SoriseomStartup"
+              Enabled="true"
+              DisplayName="ms-resource:AppDisplayName" />
+          </uap5:Extension>
+        </Extensions>
+        ```
+      - `Executable`과 `EntryPoint`에 `$targetnametoken$`, `$targetentrypoint$` 토큰을 쓰지 마라. 이유: 빌드 도구가 `Application`의
+        토큰만 치환한다. 2026-11-03에 임시 복사본에서 확인해 보니 Extension의 토큰은 그대로 남아 MakeAppx가
+        `0x80080204 The package manifest is not valid`로 실패했고, 위 값으로는 MSIX가 생성됐다.
+      - `Enabled="true"`를 유지하고 코드에서 `RequestEnableAsync`를 부르지 마라. 이유: Microsoft 문서에 따르면 패키지 데스크톱 앱은
+        매니페스트에서 켜 두면 `RequestEnableAsync` 없이 켜진다. 사용자가 앱을 한 번 실행해야 동작하고, PRD 기본값(켜짐)과 같다. 첫 실행을
+        기억할 값을 따로 저장하지 않아도 된다.
+
+      ## 2. `App.xaml.cs`의 `OnLaunched`
+      `Microsoft.Windows.AppLifecycle`의 `AppInstance`와 `ExtendedActivationKind`를 쓴다.
+      - `OnLaunched` 맨 앞에서 `var activation = AppInstance.GetCurrent().GetActivatedEventArgs();`로 한 번만 받아 변수에 둔다. 이유:
+        Microsoft 문서에 따르면 패키지 앱에서는 이 메서드가 첫 호출에서만 인수를 돌려준다. 다시 부르지 마라.
+      - 두 번째 프로세스의 `RedirectActivationToAsync`에는 이 `activation`을 넘긴다. 그 밖의 리디렉션 흐름은 그대로 둔다.
+      - 설정 창 열기: `activation?.Kind != ExtendedActivationKind.StartupTask`일 때만 `ShowSettings()`를 부른다. `?.`를 쓰는 이유: 이 메서드는
+        지원하지 않는 활성화 종류에 null을 돌려준다. null이면 일반 실행처럼 설정 창을 연다. `new SettingsWindow(store)`, 트레이,
+        `PopupController` 생성은 실행 방식과 상관없이 지금 순서대로 한다.
+      - 기존 인스턴스의 `mainInstance.Activated` 처리: 이벤트 인수의 `Kind`가 `ExtendedActivationKind.StartupTask`이면 설정 창을 열지 않는다.
+        그 외에는 지금처럼 `dispatcherQueue.TryEnqueue(ShowSettings)`를 부른다. 이유: 사용자가 로그인 직후 앱을 먼저 실행하면 뒤늦게
+        도착한 자동 실행이 기존 인스턴스로 리디렉션되는데, 이때 창이 열리면 안 된다(PRD 5).
+
+      ## 3. Core: `AppSettings.LaunchAtStartup` 제거
+      `src/Soriseom.Core/AppSettings.cs`에서 `LaunchAtStartup` 속성을 지우고, `AppSettingsTests.DefaultsMatchSettingsSpecification`에서
+      `Assert.True(settings.LaunchAtStartup);`만 지운다. 이유: 자동 실행 상태의 원본은 사용자가 작업 관리자에서도 바꿀 수 있는
+      `StartupTask.State`다. 설정 모델에 사본을 두면 어긋난다. 다른 테스트는 고치지 마라.
+
+      ## 4. `docs/ARCHITECTURE.md`
+      "창과 셸 연동 (App)"의 **자동 실행** 항목을 이 내용으로 바꾼다: MSIX `StartupTask`를 매니페스트에서 `Enabled="true"`로 선언해
+      기본으로 켜고, 설정에서 끄고 켠다. 상태의 원본은 `StartupTask.State`이며 LocalSettings에 저장하지 않는다. 시작 방식은
+      `AppInstance.GetActivatedEventArgs().Kind`로 구분해 자동 실행이면 창을 열지 않는다. 다른 절은 고치지 마라.
+
+      ## 하지 말 것
+      - `StartupTask` API를 코드에서 부르지 마라. 이유: s2에서 설정 창 항목과 함께 추가한다.
+      - `LaunchAtStartup`을 설정 창이나 `SettingsStore`에 추가하지 마라. 이유: 3번에서 모델에서 없앤다.
+      - 레지스트리 Run 키, 시작 프로그램 폴더 바로 가기를 쓰지 마라. 이유: ARCHITECTURE가 MSIX `StartupTask`로 정했다.
+      - 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가
+        시스템에 등록된다. 동작 확인은 사람이 Visual Studio에서 한다.
+    expected_files:
+      - src/Soriseom.App/Package.appxmanifest
+      - src/Soriseom.App/App.xaml.cs
+      - src/Soriseom.Core/AppSettings.cs
+      - tests/Soriseom.Core.Tests/AppSettingsTests.cs
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-sign-in-toggle
+    title: turn sign-in startup on and off from settings
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("4. 설정 창"), docs/ARCHITECTURE.md("창과 셸 연동 (App)"의 자동 실행, "횡단 관심사"의 에러 처리·현지화),
+      s1이 고친 `src/Soriseom.App/Package.appxmanifest`(`TaskId`), `src/Soriseom.App/SettingsViewModel.cs`, `SettingsWindow.xaml`,
+      `SettingsWindow.xaml.cs`, `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`.
+
+      목표: 설정 창에 "로그인 시 자동 실행" 스위치가 생긴다. 스위치는 Windows의 실제 상태를 보여주고, 바꾸면 바로 적용된다. 사용자가
+      작업 관리자에서 껐거나 정책으로 관리되는 상태처럼 앱이 바꿀 수 없으면 스위치를 비활성화하고 어디서 바꾸는지 안내한다.
+
+      ## 1. `StartupRegistration.cs` (새 파일)
+      `internal static class StartupRegistration`, namespace `Soriseom.App`. `private const string TaskId = "SoriseomStartup";`
+      - `public static async Task<StartupTaskState?> GetStateAsync()`: `await StartupTask.GetAsync(TaskId)`의 `State`를 돌려준다.
+      - `public static async Task<StartupTaskState?> SetEnabledAsync(bool enabled)`: 켜면 `await task.RequestEnableAsync()`의 결과를 돌려주고,
+        끄면 `task.Disable()` 뒤 `task.State`를 돌려준다.
+      - 두 메서드 모두 예외를 잡아 `Debug.WriteLine`에 남기고 null을 돌려준다. 이유: 셸 API가 실패해도 앱이 종료되면 안 된다.
+      - `ConfigureAwait(false)`를 쓰지 마라. 이유: 호출자가 이어서 UI 바인딩 속성을 바꾼다.
+      - 참고: 패키지 데스크톱 앱에서 `RequestEnableAsync`는 동의 대화 상자를 띄우지 않는다. 사용자가 작업 관리자에서 끈 상태
+        (`DisabledByUser`)는 앱이 덮어쓸 수 없고, 앱이 `Disable()`로 끈 상태(`Disabled`)는 다시 켤 수 있다.
+
+      ## 2. `SettingsViewModel.cs`
+      - `[ObservableProperty]` 부분 속성 세 개: `bool LaunchAtStartup`, `bool CanChangeLaunchAtStartup`, `bool ShowStartupNotice`. 초기값은 모두 false다.
+      - `private bool _isApplyingStartupState;`
+      - `public async Task RefreshLaunchAtStartupAsync()`: `ApplyStartupState(await StartupRegistration.GetStateAsync())`.
+      - `private void ApplyStartupState(StartupTaskState? state)`: 처음에 `_isApplyingStartupState = true`로 하고, 다음을 정한 뒤 false로 되돌린다.
+        - `LaunchAtStartup = state is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;`
+        - `CanChangeLaunchAtStartup = state is StartupTaskState.Enabled or StartupTaskState.Disabled;`
+        - `ShowStartupNotice = !CanChangeLaunchAtStartup;`
+      - `partial void OnLaunchAtStartupChanged(bool value)`: `_isApplyingStartupState`이면 바로 돌아간다. 아니면 `_ = SetLaunchAtStartupAsync(value);`.
+      - `private async Task SetLaunchAtStartupAsync(bool enabled)`: `ApplyStartupState(await StartupRegistration.SetEnabledAsync(enabled))`. 이유: 요청이
+        거부되면 스위치가 실제 상태로 돌아간다.
+      - `_isApplyingStartupState` 검사를 빼지 마라. 이유: 없으면 상태를 읽어 스위치에 반영하는 것만으로 `Disable()`이 불려, 사용자가 작업
+        관리자에서 끈 `DisabledByUser`가 `Disabled`로 바뀌고 의도하지 않은 상태 변경이 생긴다.
+      - 기존 표시 시간·위치·전체화면·앱 목록 코드는 고치지 마라.
+
+      ## 3. `SettingsWindow.xaml.cs`
+      생성자에서 `Activated` 이벤트를 구독한다. `args.WindowActivationState != WindowActivationState.Deactivated`이면
+      `_ = ViewModel.RefreshLaunchAtStartupAsync();`. 이유: 사용자가 창을 열어 둔 채 작업 관리자에서 상태를 바꾸고 돌아와도 맞는 값을 보여주고,
+      창이 한 번도 열리지 않은 자동 실행 경로에서는 부르지 않는다.
+
+      ## 4. `SettingsWindow.xaml`
+      "전체화면일 때 숨기기" 카드 바로 뒤에 `SettingsCardStyle` 카드를 하나 더한다. 안에는 `StackPanel`(Spacing 4)을 두고 다음을 넣는다.
+      - `ToggleSwitch`: `x:Uid="LaunchAtStartupToggle"`, `IsOn="{x:Bind ViewModel.LaunchAtStartup, Mode=TwoWay}"`,
+        `IsEnabled="{x:Bind ViewModel.CanChangeLaunchAtStartup, Mode=OneWay}"`.
+      - `TextBlock`: `x:Uid="LaunchAtStartupNotice"`, `Style="{StaticResource CaptionTextBlockStyle}"`,
+        `Foreground="{ThemeResource TextFillColorSecondaryBrush}"`, `TextWrapping="Wrap"`, `Visibility="{x:Bind ViewModel.ShowStartupNotice, Mode=OneWay}"`.
+      `Mode=OneWay`를 빼지 마라. 이유: `x:Bind` 기본값은 OneTime이라 상태 변화가 화면에 반영되지 않는다.
+
+      ## 5. 리소스 (`en-US`, `ko-KR` 양쪽)
+      - `LaunchAtStartupToggle.Header`: "Start when I sign in" / "로그인할 때 자동으로 시작"
+      - `LaunchAtStartupNotice.Text`: "Windows manages this setting. You can change it in Settings > Apps > Startup or on the Startup apps tab in Task Manager."
+        / "Windows에서 관리하는 설정이라 여기서 바꿀 수 없습니다. 설정 > 앱 > 시작 프로그램이나 작업 관리자의 시작 앱 탭에서 바꾸세요."
+      `.resw`는 XML이므로 `>`를 `&gt;`로 쓴다.
+
+      ## 하지 말 것
+      - 자동 실행 상태를 `SettingsStore`나 `LocalSettings`에 저장하지 마라. 이유: 원본은 `StartupTask.State`다.
+      - 사용자가 끈 상태를 다시 켜려고 설정 앱을 자동으로 열거나 대화 상자를 띄우지 마라. 이유: PRD에 없고 안내 문구로 충분하다.
+      - 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가
+        시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/StartupRegistration.cs
+      - src/Soriseom.App/SettingsViewModel.cs
+      - src/Soriseom.App/SettingsWindow.xaml
+      - src/Soriseom.App/SettingsWindow.xaml.cs
+      - src/Soriseom.App/Strings/en-US/Resources.resw
+      - src/Soriseom.App/Strings/ko-KR/Resources.resw
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s3-language-choice
+    title: choose the display language with a restart notice
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("4. 설정 창"의 언어 행과 재시작 안내, "6. 현지화"), docs/ARCHITECTURE.md("횡단 관심사"의 현지화, "구현 전에
+      확인할 것"), `src/Soriseom.Core/AppLanguage.cs`, `src/Soriseom.Core/AppSettings.cs`(`Language`), `src/Soriseom.App/SettingsStore.cs`,
+      `SettingsViewModel.cs`(`PositionIndex`가 enum을 ComboBox 인덱스로 다루는 방식), `SettingsWindow.xaml`, `Soriseom.App.csproj`,
+      `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`.
+
+      목표: 설정 창에서 언어를 시스템/한국어/English 중에 고른다. 고른 값은 바로 저장되고, 앱을 다시 실행하면 적용되며, 처음 실행했을 때와
+      다른 언어를 고르면 다시 실행해야 한다고 안내한다(PRD 4, 6). 실행 중에 UI 언어를 바꾸는 코드는 쓰지 않는다.
+
+      ## 1. `Soriseom.App.csproj`
+      첫 `PropertyGroup`에 다음 두 줄을 더한다.
+      ```xml
+      <AppxBundleAutoResourcePackageQualifiers>Scale|DXFeatureLevel</AppxBundleAutoResourcePackageQualifiers>
+      <AppxDefaultResourceQualifiers>Language=en-US;ko-KR</AppxDefaultResourceQualifiers>
+      ```
+      이유: 번들을 만들면 기본으로 언어 리소스가 기본 패키지에서 분리된다. 2026-11-03에 임시 복사본에서 `-p:AppxBundle=Always`로 확인해 보니,
+      이 설정이 없을 때 번들에 `ko-KR` 문자열이 전혀 들어가지 않았고, 이 설정이 있을 때 기본 패키지의 `resources.pri`에 들어갔다. Microsoft 문서도
+      앱 안에서 언어를 바꾸는 앱은 언어 리소스를 기본 패키지에 넣으라고 안내한다. 일반 MSIX 생성도 이 설정으로 통과하는 것을 확인했다.
+
+      ## 2. `SettingsStore.cs`
+      `private const string LanguageKey = "Language";`를 더한다. `Update`에서 `settings.Language.ToString()`을 저장하고, `Load`에서 `Position`과 같은
+      방식(`Enum.TryParse`, `Enum.IsDefined`)으로 읽는다.
+
+      ## 3. `SettingsViewModel.cs`
+      - `private readonly AppLanguage _languageAtLaunch;`. 생성자에서 `store.Current.Language`를 담는다. `LanguageIndex` 속성에 값을 넣기 전에
+        담아라.
+      - `[ObservableProperty]` 부분 속성 `int LanguageIndex`, `bool ShowLanguageRestartNotice`. 생성자에서 `LanguageIndex = (int)store.Current.Language`로 정한다.
+      - `partial void OnLanguageIndexChanged(int value)`:
+        1. `var language = (AppLanguage)value;`. `Enum.IsDefined(language)`가 아니면 돌아간다(`OnPositionIndexChanged`와 같다).
+        2. `language == _store.Current.Language`이면 돌아간다. 이유: 생성자에서 속성을 채울 때도 이 메서드가 불린다.
+           `PrimaryLanguageOverride`는 사용자가 설정에서 바꿀 때만 써야 하고 실행할 때마다 쓰면 안 된다고 Microsoft 문서가 안내한다.
+        3. `_store.Update(_store.Current with { Language = language });`
+        4. `ApplicationLanguages.PrimaryLanguageOverride = ...` (`Windows.Globalization`). `Korean`은 `"ko-KR"`, `English`는 `"en-US"`, `System`은 `string.Empty`로
+           설정한다. 빈 문자열이 재정의를 지운다. 값은 Windows가 세션을 넘겨 유지하므로 앱 시작 코드에서 다시 설정하지 마라.
+        5. `ShowLanguageRestartNotice = language != _languageAtLaunch;`
+      - 기존 코드는 고치지 마라.
+
+      ## 4. `SettingsWindow.xaml`
+      자동 실행 카드 바로 뒤, `AppsHeader` 앞에 `SettingsCardStyle` 카드를 더한다. 안에는 `StackPanel`(Spacing 4)을 두고 다음을 넣는다.
+      - `ComboBox`: `x:Uid="LanguageComboBox"`, `SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}"`. 항목은 `AppLanguage` 순서대로
+        `ComboBoxItem` `x:Uid="LanguageSystem"`, `"LanguageKorean"`, `"LanguageEnglish"`.
+      - `TextBlock`: `x:Uid="LanguageRestartNotice"`, `Style="{StaticResource CaptionTextBlockStyle}"`, `Foreground="{ThemeResource TextFillColorSecondaryBrush}"`,
+        `TextWrapping="Wrap"`, `Visibility="{x:Bind ViewModel.ShowLanguageRestartNotice, Mode=OneWay}"`.
+
+      ## 5. 리소스 (`en-US`, `ko-KR` 양쪽)
+      - `LanguageComboBox.Header`: "Language" / "언어"
+      - `LanguageSystem.Content`: "Use system setting" / "시스템 설정 사용"
+      - `LanguageKorean.Content`: 양쪽 모두 "한국어". 이유: 언어 이름은 그 언어로 표기해야 현재 UI 언어를 못 읽는 사용자도 찾는다.
+      - `LanguageEnglish.Content`: 양쪽 모두 "English"
+      - `LanguageRestartNotice.Text`: "To apply the new language, exit the app from the tray icon menu and open it again."
+        / "새 언어를 적용하려면 트레이 아이콘 메뉴에서 앱을 종료한 뒤 다시 실행하세요."
+
+      ## 6. `docs/ARCHITECTURE.md`
+      - "구현 전에 확인할 것"의 "언어 변경이 재시작 없이 반영되는지" 항목을 `[x]`로 바꾸고 결과를 적는다: `PrimaryLanguageOverride`는 이미 불러온 UI에 바로
+        반영된다는 보장이 없고 `x:Uid` 문자열도 갱신되지 않으므로, 재시작을 안내한다.
+      - "횡단 관심사"의 **현지화** 항목에 덧붙인다: 언어 리소스는 번들의 기본 패키지에 넣는다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store
+        번들에 한국어가 들어가지 않는다.
+      - 다른 항목은 고치지 마라.
+
+      ## 하지 말 것
+      - 재시작 버튼이나 `AppInstance.Restart`를 추가하지 마라. 이유: PRD는 안내만 요구한다.
+      - 열린 창을 다시 만들거나 문자열을 다시 불러와 실행 중에 언어를 바꾸려 하지 마라. 이유: 트레이 메뉴, 팝업, 설정 창의 `x:Uid`를 모두 다뤄야 하는 큰
+        작업이고, 지원 여부도 문서로 보장되지 않는다.
+      - `Microsoft.Windows.Globalization`이나 현지화 라이브러리를 추가하지 마라. 이유: 패키지 앱은 `Windows.Globalization.ApplicationLanguages`로 충분하고,
+        docs/ADR.md 허용 목록에 없는 패키지는 쓰지 않는다.
+      - Core와 테스트를 고치지 마라. 이유: `AppSettings.Language`와 기본값 테스트가 이미 있다.
+      - 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가
+        시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/Soriseom.App.csproj
+      - src/Soriseom.App/SettingsStore.cs
+      - src/Soriseom.App/SettingsViewModel.cs
+      - src/Soriseom.App/SettingsWindow.xaml
+      - src/Soriseom.App/Strings/en-US/Resources.resw
+      - src/Soriseom.App/Strings/ko-KR/Resources.resw
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s4-app-display-names
+    title: show app names instead of app ids in settings
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("3. 표시하지 않는 경우"의 첫 항목, "4. 설정 창"), docs/ADR.md(ADR-001, ADR-008), `src/Soriseom.App/NativeMethods.txt`,
+      `src/Soriseom.App/AppToggleViewModel.cs`, `SettingsViewModel.cs`(`Apps` 생성과 정렬), `SettingsWindow.xaml`의 앱 목록 `DataTemplate`,
+      `PopupWindow.xaml.cs`(CsWin32 `PInvoke`를 부르는 방식), `MediaSessionAdapter.cs`(`AppId`는 `SourceAppUserModelId`).
+
+      목표: 설정 창의 앱별 켜기/끄기 목록이 `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify` 같은 앱 ID 대신 Windows에 등록된 앱 이름을 보여준다. 이름을 찾지
+      못하면 앱 ID를 그대로 보여준다. 설정에 저장하는 키는 계속 앱 ID다.
+
+      ## 1. CsWin32 설정
+      - `NativeMethods.txt`에 `SHCreateItemInKnownFolder`, `IShellItem`, `FOLDERID_AppsFolder`, `SIGDN`, `CoTaskMemFree`를 한 줄씩 더한다.
+      - `src/Soriseom.App/NativeMethods.json`을 새로 만든다.
+        ```json
+        {
+          "$schema": "https://aka.ms/CsWin32.schema.json",
+          "allowMarshaling": false
+        }
+        ```
+        이유: 트리밍을 켠 빌드에서는 .NET 내장 COM 마샬링이 꺼진다. 마샬링 없는 COM 구조체는 트리밍 여부와 상관없이 동작하므로, 뒤에 Release 빌드의
+        트리밍 방침을 어떻게 정해도 이 코드를 고치지 않아도 된다. 2026-11-03에 임시 복사본에서 기존 `PInvoke` 호출을 고치지 않고 이 설정으로 경고 없이
+        빌드되고 포맷 검사도 통과하는 것을 확인했다.
+
+      ## 2. `AppDisplayName.cs` (새 파일)
+      `internal static class AppDisplayName`, namespace `Soriseom.App`. `public static unsafe string Resolve(string appId)`.
+      1. `Guid folder = PInvoke.FOLDERID_AppsFolder;`, `Guid shellItemId = IShellItem.IID_Guid;`, `void* shellItem;`
+      2. `fixed (char* name = appId)` 안에서 `HRESULT result = PInvoke.SHCreateItemInKnownFolder(&folder, 0, name, &shellItemId, &shellItem);`
+         실패하면 `Debug.WriteLine`에 남기고 `appId`를 돌려준다.
+      3. `var item = (IShellItem*)shellItem;`로 받아 `try/finally`에서 `item->Release()`를 부른다.
+      4. `PWSTR displayName; item->GetDisplayName(SIGDN.SIGDN_NORMALDISPLAY, &displayName);` 뒤 `try/finally`에서 `PInvoke.CoTaskMemFree(displayName)`를 부른다.
+         문자열이 비어 있거나 공백이면 `appId`를 돌려준다.
+      5. `GetDisplayName`이 던지는 예외를 잡아 `Debug.WriteLine`에 남기고 `appId`를 돌려준다. 이유: 앱 이름을 못 읽어도 설정 창은 열려야 한다.
+      2026-11-03에 콘솔 프로그램으로 이 방식을 확인한 결과: `Chrome`은 "Google Chrome", `MSEdge`는 "Microsoft Edge"였고, 패키지 앱 ID는 현지화된 이름을
+      돌려줬으며, 등록되지 않은 ID는 `0x80070490`으로 실패했다. 실패는 정상 경로이므로 예외로 다루지 마라.
+
+      ## 3. `AppToggleViewModel.cs`
+      생성자에 `string displayName` 매개변수를 `appId` 뒤에 더하고 `public string DisplayName { get; }` 속성을 둔다. `AppId`와 `_enabledChanged` 호출은 그대로 둔다.
+
+      ## 4. `SettingsViewModel.cs`
+      - 앱 항목을 만드는 두 곳(생성자, `OnSettingsChanged`)에서 `AppDisplayName.Resolve(appId)` 값을 넘긴다.
+      - 목록을 표시 이름 기준으로 정렬한다. 생성자는 이름을 먼저 구해 `StringComparer.OrdinalIgnoreCase`로 정렬하고, `OnSettingsChanged`의 삽입 위치 계산도
+        `DisplayName`으로 비교한다.
+      - 이미 있는 앱인지 검사하는 코드는 계속 `AppId`로 비교한다.
+
+      ## 5. `SettingsWindow.xaml`
+      앱 목록 `ToggleSwitch`의 `Header`를 `{x:Bind DisplayName}`로 바꾼다.
+
+      ## 하지 말 것
+      - 표시 이름을 `AppSettings`, `SettingsStore`, `LocalSettings`에 저장하지 마라. 이유: 이름은 앱 업데이트와 표시 언어에 따라 바뀌는 파생 값이고, 켜기/끄기의
+        키는 앱 ID다.
+      - `PopupDecider`에 표시 이름을 넘기지 마라. 이유: 끈 앱 판단은 앱 ID로 한다.
+      - `AppInfo.GetFromAppUserModelId`, `Windows.Management.Deployment.PackageManager`, 프로세스나 창 제목을 읽는 방식을 쓰지 마라. 이유: 첫째는 최소 지원 버전
+        10.0.17763에 없고, 둘째는 제한된 capability가 필요하며, 나머지는 ADR-001이 금지한다.
+      - `[DllImport]`, `[LibraryImport]`, `[ComImport]`로 직접 선언하지 마라. 이유: ADR-008.
+      - 앱 항목 아이콘을 추가하지 마라. 이유: PRD에 없다.
+      - 앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록 포함). 이유: 스스로 끝나지 않는 GUI이고, 실행하면 개발용 패키지가
+        시스템에 등록된다.
+    expected_files:
+      - src/Soriseom.App/NativeMethods.txt
+      - src/Soriseom.App/NativeMethods.json
+      - src/Soriseom.App/AppDisplayName.cs
+      - src/Soriseom.App/AppToggleViewModel.cs
+      - src/Soriseom.App/SettingsViewModel.cs
+      - src/Soriseom.App/SettingsWindow.xaml
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
