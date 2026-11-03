@@ -10,6 +10,7 @@ internal sealed class SettingsStore
     private const string DisplaySecondsKey = "DisplaySeconds";
     private const string PositionKey = "Position";
     private const string HideWhenFullscreenKey = "HideWhenFullscreen";
+    private const string LanguageKey = "Language";
     private const string AppsContainerName = "Apps";
 
     public SettingsStore()
@@ -35,6 +36,7 @@ internal sealed class SettingsStore
             values[DisplaySecondsKey] = settings.DisplaySeconds;
             values[PositionKey] = settings.Position.ToString();
             values[HideWhenFullscreenKey] = settings.HideWhenFullscreen;
+            values[LanguageKey] = settings.Language.ToString();
             var appsValues = ApplicationData.Current.LocalSettings.CreateContainer(AppsContainerName, ApplicationDataCreateDisposition.Always).Values;
             foreach (var (appId, enabled) in settings.Apps)
             {
@@ -69,6 +71,12 @@ internal sealed class SettingsStore
             if (values.TryGetValue(HideWhenFullscreenKey, out var fullscreenValue) && fullscreenValue is bool hideWhenFullscreen)
             {
                 settings = settings with { HideWhenFullscreen = hideWhenFullscreen };
+            }
+
+            if (values.TryGetValue(LanguageKey, out var languageValue) && languageValue is string languageText
+                && Enum.TryParse(languageText, out AppLanguage language) && Enum.IsDefined(language))
+            {
+                settings = settings with { Language = language };
             }
 
             var apps = ImmutableDictionary<string, bool>.Empty;

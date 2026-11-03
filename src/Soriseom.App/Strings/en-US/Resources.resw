@@ -103,6 +103,21 @@
   <data name="LaunchAtStartupNotice.Text" xml:space="preserve">
     <value>Windows manages this setting. You can change it in Settings &gt; Apps &gt; Startup or on the Startup apps tab in Task Manager.</value>
   </data>
+  <data name="LanguageComboBox.Header" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="LanguageSystem.Content" xml:space="preserve">
+    <value>Use system setting</value>
+  </data>
+  <data name="LanguageKorean.Content" xml:space="preserve">
+    <value>한국어</value>
+  </data>
+  <data name="LanguageEnglish.Content" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="LanguageRestartNotice.Text" xml:space="preserve">
+    <value>To apply the new language, exit the app from the tray icon menu and open it again.</value>
+  </data>
   <data name="AppsHeader.Text" xml:space="preserve">
     <value>Apps</value>
   </data>

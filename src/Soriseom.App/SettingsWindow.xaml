@@ -66,6 +66,23 @@
                         Visibility="{x:Bind ViewModel.ShowStartupNotice, Mode=OneWay}" />
                 </StackPanel>
             </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <StackPanel Spacing="4">
+                    <ComboBox
+                        x:Uid="LanguageComboBox"
+                        SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
+                        <ComboBoxItem x:Uid="LanguageSystem" />
+                        <ComboBoxItem x:Uid="LanguageKorean" />
+                        <ComboBoxItem x:Uid="LanguageEnglish" />
+                    </ComboBox>
+                    <TextBlock
+                        x:Uid="LanguageRestartNotice"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind ViewModel.ShowLanguageRestartNotice, Mode=OneWay}" />
+                </StackPanel>
+            </Border>
             <TextBlock
                 x:Uid="AppsHeader"
                 Style="{StaticResource BodyStrongTextBlockStyle}"

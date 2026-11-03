@@ -62,7 +62,7 @@ App: 팝업 창
 - **에러 처리**: GSMTC, 썸네일, 셸 API가 실패해도 앱이 종료되지 않습니다. 썸네일을 못 읽으면 음표 아이콘을 쓰고, 세션 정보를 못 읽으면 그 팝업만 건너뜁니다. 예외는 디버그 출력에 남깁니다.
 - **로깅**: `System.Diagnostics.Debug` 출력만 씁니다. 파일 로그와 네트워크 전송은 없습니다.
 - **설정 저장**: `ApplicationData.Current.LocalSettings`. 키 이름은 한 곳에 상수로 모읍니다.
-- **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다.
+- **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다. 언어 리소스는 번들의 기본 패키지에 넣습니다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store 번들에 한국어가 들어가지 않습니다.
 - **의존성**: Central Package Management로 버전을 고정합니다. 허용 목록은 `docs/ADR.md`의 "원칙"에 있습니다.
 - **품질 게이트**: `Directory.Build.props`에서 Nullable, `TreatWarningsAsErrors`(NU1901~NU1904 제외), `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)을 켭니다. StyleCop 규칙 조정은 `docs/ADR.md` ADR-006을 따릅니다.
 - **CI**: GitHub Actions(Windows runner). push와 PR에서 빌드, 테스트, 포맷 검사를 돌립니다. `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`으로 MSIX를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다.
@@ -75,6 +75,6 @@ App: 팝업 창
 - [ ] 패키지 앱에서 GSMTC를 쓰는 데 별도 capability가 필요한지
 - [ ] WinUI 3 창에 Acrylic 배경과 클릭 통과(확장 창 스타일)를 함께 적용할 수 있는지
 - [ ] Windows 방해 금지 모드를 감지할 공식 API가 있는지. 없으면 이 기능은 빼고 PRD를 고칩니다.
-- [ ] 언어 변경이 재시작 없이 반영되는지
+- [x] 언어 변경이 재시작 없이 반영되는지: `PrimaryLanguageOverride`는 이미 불러온 UI에 바로 반영된다는 보장이 없고 `x:Uid` 문자열도 갱신되지 않으므로, 재시작을 안내합니다.
 - [ ] Store 자동 제출 방식(msstore CLI와 Entra ID 앱 연동), 최초 제출을 수동으로 해야 하는지
 

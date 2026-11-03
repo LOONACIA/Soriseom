@@ -11,6 +11,8 @@
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
+    <AppxBundleAutoResourcePackageQualifiers>Scale|DXFeatureLevel</AppxBundleAutoResourcePackageQualifiers>
+    <AppxDefaultResourceQualifiers>Language=en-US;ko-KR</AppxDefaultResourceQualifiers>
   </PropertyGroup>
 
   <ItemGroup>

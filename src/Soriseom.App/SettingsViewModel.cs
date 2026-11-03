@@ -2,20 +2,24 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Soriseom.Core;
 using Windows.ApplicationModel;
+using Windows.Globalization;
 
 namespace Soriseom.App;
 
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly SettingsStore _store;
+    private readonly AppLanguage _languageAtLaunch;
     private bool _isApplyingStartupState;
 
     internal SettingsViewModel(SettingsStore store)
     {
         _store = store;
+        _languageAtLaunch = store.Current.Language;
         DisplaySeconds = store.Current.DisplaySeconds;
         PositionIndex = (int)store.Current.Position;
         HideWhenFullscreen = store.Current.HideWhenFullscreen;
+        LanguageIndex = (int)store.Current.Language;
         foreach (var (appId, enabled) in store.Current.Apps.OrderBy(app => app.Key, StringComparer.OrdinalIgnoreCase))
         {
             Apps.Add(new AppToggleViewModel(appId, enabled, OnAppEnabledChanged));
@@ -47,6 +51,12 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool ShowStartupNotice { get; set; }
+
+    [ObservableProperty]
+    public partial int LanguageIndex { get; set; }
+
+    [ObservableProperty]
+    public partial bool ShowLanguageRestartNotice { get; set; }
 
     public async Task RefreshLaunchAtStartupAsync()
     {
@@ -80,6 +90,29 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
 
         _ = SetLaunchAtStartupAsync(value);
+    }
+
+    partial void OnLanguageIndexChanged(int value)
+    {
+        var language = (AppLanguage)value;
+        if (!Enum.IsDefined(language))
+        {
+            return;
+        }
+
+        if (language == _store.Current.Language)
+        {
+            return;
+        }
+
+        _store.Update(_store.Current with { Language = language });
+        ApplicationLanguages.PrimaryLanguageOverride = language switch
+        {
+            AppLanguage.Korean => "ko-KR",
+            AppLanguage.English => "en-US",
+            _ => string.Empty,
+        };
+        ShowLanguageRestartNotice = language != _languageAtLaunch;
     }
 
     private void ApplyStartupState(StartupTaskState? state)
