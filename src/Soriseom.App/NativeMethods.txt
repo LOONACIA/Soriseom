@@ -8,3 +8,8 @@ DwmSetWindowAttribute
 DWM_WINDOW_CORNER_PREFERENCE
 SHQueryUserNotificationState
 AllowSetForegroundWindow
+SHCreateItemInKnownFolder
+IShellItem
+FOLDERID_AppsFolder
+SIGDN
+CoTaskMemFree

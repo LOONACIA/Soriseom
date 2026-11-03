@@ -20,9 +20,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         PositionIndex = (int)store.Current.Position;
         HideWhenFullscreen = store.Current.HideWhenFullscreen;
         LanguageIndex = (int)store.Current.Language;
-        foreach (var (appId, enabled) in store.Current.Apps.OrderBy(app => app.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var (appId, displayName, enabled) in store.Current.Apps
+            .Select(app => (app.Key, DisplayName: AppDisplayName.Resolve(app.Key), app.Value))
+            .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            Apps.Add(new AppToggleViewModel(appId, enabled, OnAppEnabledChanged));
+            Apps.Add(new AppToggleViewModel(appId, displayName, enabled, OnAppEnabledChanged));
         }
 
         store.Changed += OnSettingsChanged;
@@ -138,13 +140,14 @@ public sealed partial class SettingsViewModel : ObservableObject
                 continue;
             }
 
+            var displayName = AppDisplayName.Resolve(appId);
             var index = 0;
-            while (index < Apps.Count && StringComparer.OrdinalIgnoreCase.Compare(Apps[index].AppId, appId) < 0)
+            while (index < Apps.Count && StringComparer.OrdinalIgnoreCase.Compare(Apps[index].DisplayName, displayName) < 0)
             {
                 index++;
             }
 
-            Apps.Insert(index, new AppToggleViewModel(appId, enabled, OnAppEnabledChanged));
+            Apps.Insert(index, new AppToggleViewModel(appId, displayName, enabled, OnAppEnabledChanged));
         }
     }
 

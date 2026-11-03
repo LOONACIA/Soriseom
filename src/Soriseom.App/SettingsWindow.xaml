@@ -100,7 +100,7 @@
                     <DataTemplate x:DataType="local:AppToggleViewModel">
                         <Border Style="{StaticResource SettingsCardStyle}">
                             <ToggleSwitch
-                                Header="{x:Bind AppId}"
+                                Header="{x:Bind DisplayName}"
                                 IsOn="{x:Bind IsEnabled, Mode=TwoWay}" />
                         </Border>
                     </DataTemplate>
