@@ -7,8 +7,8 @@ blocks the command and the reason is shown to the model.
 Two tiers:
   always        destructive commands nobody should run unattended
   harness mode  (HARNESS_STEP env var set by harness.py) additionally blocks
-                anything that changes git state or touches .harness/ or
-                .claude/skills/harness/
+                anything that changes git state, touches .harness/ or
+                .claude/skills/harness/, or launches the app
 
 Hooks are fail-open: any crash here lets the command through. Keep it small,
 standard library only, and exit 0 on unexpected input.
@@ -47,6 +47,10 @@ READ_ONLY_TOOLS = {
     "cat", "type", "less", "more", "head", "tail", "ls", "dir", "tree", "find", "grep", "rg", "egrep",
     "wc", "stat", "file", "Get-Content", "Get-ChildItem", "Select-String", "gc", "gci", "sls", "echo",
 }
+APP_LAUNCH = re.compile(
+    r"tools[\\/]smoke[\\/]|Add-AppxPackage|shell:AppsFolder|Soriseom\.App\.exe|\bdotnet\s+run\b",
+    re.IGNORECASE,
+)
 
 
 def split_simple_commands(cmd: str):
@@ -75,6 +79,8 @@ def harness_violation(cmd: str):
             tool = first_word(seg)
             if tool not in READ_ONLY_TOOLS or re.search(r">|>>", seg):
                 return "modifying or executing anything under .harness/ or .claude/skills/harness/ is reserved for the harness"
+        if APP_LAUNCH.search(seg) and first_word(seg) not in READ_ONLY_TOOLS:
+            return "Codex must not launch the app during a harness step"
     return None
 
 
