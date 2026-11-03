@@ -20,8 +20,6 @@ public sealed record AppSettings
 
     public AppLanguage Language { get; init; } = AppLanguage.System;
 
-    public bool LaunchAtStartup { get; init; } = true;
-
     public ImmutableDictionary<string, bool> Apps { get; init; } = ImmutableDictionary<string, bool>.Empty;
 
     public bool IsAppEnabled(string appId) => !Apps.TryGetValue(appId, out bool enabled) || enabled;

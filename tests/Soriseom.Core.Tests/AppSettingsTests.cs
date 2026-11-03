@@ -16,7 +16,6 @@ public class AppSettingsTests
         Assert.Equal(PopupPosition.TopCenter, settings.Position);
         Assert.True(settings.HideWhenFullscreen);
         Assert.Equal(AppLanguage.System, settings.Language);
-        Assert.True(settings.LaunchAtStartup);
         Assert.Empty(settings.Apps);
     }
 

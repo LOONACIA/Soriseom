@@ -33,22 +33,33 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        var activation = AppInstance.GetCurrent().GetActivatedEventArgs();
         var mainInstance = AppInstance.FindOrRegisterForKey(MainInstanceKey);
         if (!mainInstance.IsCurrent)
         {
             PInvoke.AllowSetForegroundWindow(mainInstance.ProcessId);
-            await mainInstance.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs());
+            await mainInstance.RedirectActivationToAsync(activation);
             Process.GetCurrentProcess().Kill();
             return;
         }
 
         var dispatcherQueue = DispatcherQueue.GetForCurrentThread();
-        mainInstance.Activated += (_, _) => dispatcherQueue.TryEnqueue(ShowSettings);
+        mainInstance.Activated += (_, activationArgs) =>
+        {
+            if (activationArgs.Kind != ExtendedActivationKind.StartupTask)
+            {
+                dispatcherQueue.TryEnqueue(ShowSettings);
+            }
+        };
 
         var store = new SettingsStore();
         _settingsWindow = new SettingsWindow(store);
         _trayController = new TrayController(ShowSettings, ExitApplication);
-        ShowSettings();
+        if (activation?.Kind != ExtendedActivationKind.StartupTask)
+        {
+            ShowSettings();
+        }
+
         _popupController = new PopupController(dispatcherQueue, store);
         await _popupController.StartAsync();
     }
