@@ -17,6 +17,8 @@ src/
                             # GSMTC 어댑터, 팝업 창, 설정 창, 트레이, 시작 작업, 리소스(.resw)
 tests/
 └── Soriseom.Core.Tests/    # xUnit v3. Core만 테스트
+tools/
+└── smoke/                  # 앱을 실행해 UI Automation으로 확인하는 스크립트(ADR-009)
 .github/workflows/          # CI: 빌드·테스트·포맷, 태그 시 Store 제출
 docs/                       # PRD, ARCHITECTURE, ADR
 ```

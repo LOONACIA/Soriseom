@@ -44,6 +44,8 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 | NuGet 패키지 추가 | `dotnet add <프로젝트 경로> package <패키지> --version <버전>` |
 | 취약 패키지 점검 | `dotnet package list --project Soriseom.slnx --vulnerable` |
 | 로컬 MSIX 생성(Debug, 서명 없음) | `dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
+| 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Scenario launch,relaunch,startup,language,media,tray]` |
+| 재로그인 직후 상태 확인(읽기 전용) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -AfterSignIn` |
 
 ### 주의
 
@@ -51,7 +53,9 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 - 테스트는 Microsoft Testing Platform으로 돌아갑니다(`global.json`의 `test.runner`, xUnit v3에 필요). 필터는 VSTest의 `--filter`가 아니라 `--filter-method`, `--filter-class`를 씁니다. 테스트가 실패하면 종료 코드가 0이 아닙니다.
 - 패키지를 추가하면 버전은 `Directory.Packages.props`에 자동으로 들어가고 `.csproj`에는 버전 없는 참조만 남습니다. `docs/ADR.md`에 없는 패키지는 추가하지 않습니다.
 - MSIX는 `src/Soriseom.App/AppPackages/`에 생깁니다(git에서 무시됨).
-- 앱을 실행하지 마세요(`dotnet run` 포함). 트레이에 상주하는 GUI 프로세스라 스스로 끝나지 않고, 패키지 앱이라 실행하면 개발용 패키지가 시스템에 등록됩니다. 실행 확인은 사람이 Visual Studio에서 합니다.
+- Codex는 앱을 실행하지 않습니다(`dotnet run`, exe 실행, 패키지 등록, `tools/smoke/` 포함). 트레이에 상주하는 GUI 프로세스라 스스로 끝나지 않아 스텝이 타임아웃까지 멈춥니다.
+- Claude도 앱은 `tools/smoke/Smoke.ps1`로만 실행하고, 사용자가 요청했을 때만 돌립니다. 실제 데스크톱에 창을 띄우고 개발 패키지를 다시 등록합니다. 설정, 언어 재정의, 자동 실행 상태는 끝날 때 복원합니다.
+- `Smoke.ps1`의 종료 코드는 0 통과, 1 실패, 3 지금 이 PC에서 검사할 수 없음(화면 잠김, 전체화면, 다른 미디어 재생)입니다. 3은 코드와 무관합니다. 스크립트가 못 보는 항목은 `docs/ADR.md` ADR-009에 있고 사람이 확인합니다.
 - Release 빌드는 아직 실패합니다. 트리밍 경고(IL2104)가 오류로 처리되기 때문이며, 해결 방법은 `docs/ARCHITECTURE.md` "구현 전에 확인할 것"에 있습니다.
 
 ## C# 규칙
@@ -86,4 +90,4 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 
 - xUnit v3를 씁니다. 테스트는 `tests/Soriseom.Core.Tests`에만 둡니다.
 - Core에 판단 로직을 추가하거나 바꾸면 같은 변경에서 테스트도 추가하거나 바꿉니다.
-- App(UI, GSMTC 어댑터, 셸 연동)은 빌드 성공과 수동 확인으로 검증합니다.
+- App(UI, GSMTC 어댑터, 셸 연동)은 빌드 성공과 `tools/smoke/`로 검증하고, 스크립트가 못 보는 항목만 사람이 확인합니다(ADR-009).

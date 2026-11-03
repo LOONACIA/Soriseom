@@ -18,6 +18,7 @@
 - 인수 조건을 통과시키려고 테스트를 약화, 스킵, 삭제하거나 특수 처리하지 마세요. 조건이 잘못돼 보이면 `blockers`에 적고 실패한 채로 둡니다.
 - git 상태를 바꾸지 마세요: `commit`, `checkout`, `stash`, `branch`, `reset`, `rebase` 금지. 커밋은 리뷰 후 하네스가 합니다.
 - `.harness/`와 `.claude/skills/harness/` 아래는 아무것도 수정하지 마세요.
-- PreToolUse 훅(`.codex/hooks/guard.py`)이 위 두 규칙을 강제하고 위험한 명령(force push, `git reset --hard`, 루트 재귀 삭제, 파괴적 SQL)을 막습니다. 명령이 "Blocked by .codex/hooks/guard.py"로 막히면 우회 방법을 찾지 말고, 그 명령 없이 스텝을 끝낸 뒤 `decisions`나 `blockers`에 적으세요.
+- 앱을 실행하지 마세요(`dotnet run`, exe 실행, 패키지 등록, `tools/smoke/` 포함).
+- PreToolUse 훅(`.codex/hooks/guard.py`)이 위 세 규칙을 강제하고 위험한 명령(force push, `git reset --hard`, 루트 재귀 삭제, 파괴적 SQL)을 막습니다. 명령이 "Blocked by .codex/hooks/guard.py"로 막히면 우회 방법을 찾지 말고, 그 명령 없이 스텝을 끝낸 뒤 `decisions`나 `blockers`에 적으세요.
 - 최종 메시지는 출력 스키마가 요구하는 JSON 객체여야 합니다: `summary`, `changed_files`, `decisions`, `blockers`. 막힌 것이 없으면 `blockers`는 빈 리스트입니다.
 - `summary`, `decisions`, `blockers`는 한국어로 씁니다. 코드, 주석, 식별자는 지시문 언어와 상관없이 저장소의 기존 관례와 `CLAUDE.md`를 따릅니다.
