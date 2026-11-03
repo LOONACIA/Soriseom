@@ -314,6 +314,19 @@ function Save-Screenshot($Window, [string] $Name) {
     Write-Line "screenshot $path"
 }
 
+# A tray icon has no window of its own, so its rectangle is copied from the screen.
+function Save-ElementScreenshot($Element, [string] $Name) {
+    $bounds = $Element.Current.BoundingRectangle
+    $bitmap = [System.Drawing.Bitmap]::new([int]$bounds.Width, [int]$bounds.Height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen([int]$bounds.X, [int]$bounds.Y, 0, 0, $bitmap.Size)
+    $graphics.Dispose()
+    $path = Join-Path $OutDir "$Name.png"
+    $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+    Write-Line "screenshot $path"
+}
+
 function Test-Launch {
     Stop-App
     Start-AppActivation
@@ -562,6 +575,7 @@ function Test-Tray {
         return
     }
 
+    Save-ElementScreenshot $icon 'tray-icon'
     $icon.GetCurrentPattern($InvokePattern).Invoke()
     Check 'clicking the tray icon opens settings' ([bool](Wait-For { Get-SettingsWindow }))
 }

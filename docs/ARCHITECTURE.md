@@ -55,7 +55,7 @@ App: 팝업 창
 ## 창과 셸 연동 (App)
 
 - **팝업 창**: 테두리 없음, 항상 위, 활성화하지 않음(포커스 유지), 작업 표시줄과 Alt+Tab에서 제외, 클릭 통과, Acrylic 배경. 위치는 주 모니터 작업 영역 기준 6곳이고 DPI 배율을 반영합니다.
-- **트레이**: H.NotifyIcon.WinUI. 왼쪽 클릭은 설정 창, 오른쪽 클릭은 메뉴(설정, 종료)입니다.
+- **트레이**: H.NotifyIcon.WinUI. 왼쪽 클릭은 설정 창, 오른쪽 클릭은 메뉴(설정, 종료)입니다. 아이콘은 작업 표시줄 테마(`SystemUsesLightTheme`)를 따르며 앱 테마와 다를 수 있습니다. 실행 중 변경은 `UISettings.ColorValuesChanged`로 감지합니다.
 - **단일 인스턴스**: Windows App SDK의 `AppInstance`로 두 번째 실행을 기존 인스턴스로 넘기고, 기존 인스턴스는 설정 창을 엽니다.
 - **자동 실행**: MSIX `StartupTask`를 매니페스트에서 `Enabled="true"`로 선언해 기본으로 켜고, 설정에서 끄고 켭니다. 상태의 원본은 `StartupTask.State`이며 LocalSettings에 저장하지 않습니다. 시작 방식은 `AppInstance.GetActivatedEventArgs().Kind`로 구분해 자동 실행이면 창을 열지 않습니다.
 - **전체화면 감지**: `SHQueryUserNotificationState`를 써서 Windows 알림과 같은 기준으로 판단합니다.
