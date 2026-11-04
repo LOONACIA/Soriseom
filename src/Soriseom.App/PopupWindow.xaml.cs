@@ -59,7 +59,7 @@ public sealed partial class PopupWindow : Window
         ElementCompositionPreview.GetElementVisual(IslandForeground).Clip = _clip;
         _islandVisual.CenterPoint = new Vector3(WidthDip / 2f, HeightDip / 2f, 0);
         _easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0), new Vector2(0, 1));
-        IslandBackdrop.SizeChanged += (_, args) => FollowBackdropWidth(args.NewSize.Width);
+        IslandSurface.SizeChanged += (_, args) => FollowSurfaceWidth(args.NewSize.Width);
         if (DesktopAcrylicController.IsSupported())
         {
             IslandBackdrop.SystemBackdrop = new PopupAcrylicBackdrop();
@@ -128,7 +128,7 @@ public sealed partial class PopupWindow : Window
         if (!_isVisible)
         {
             _isVisible = true;
-            FollowBackdropWidth(HeightDip);
+            FollowSurfaceWidth(HeightDip);
             _islandVisual.Opacity = 0;
             _islandVisual.Scale = new Vector3(HiddenScale, HiddenScale, 1);
             AppWindow.Show(false);
@@ -136,7 +136,7 @@ public sealed partial class PopupWindow : Window
         }
         else if (_isClosing)
         {
-            StartOpenAnimation(IslandBackdrop.ActualWidth, TimeSpan.Zero);
+            StartOpenAnimation(IslandSurface.ActualWidth, TimeSpan.Zero);
         }
 
         _ = LoadThumbnailAsync(thumbnail);
@@ -157,7 +157,7 @@ public sealed partial class PopupWindow : Window
         _isClosing = true;
         var version = ++_animationVersion;
         var batch = _islandVisual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        AnimateBackdropWidth(IslandBackdrop.ActualWidth, HeightDip, _collapseDuration, TimeSpan.Zero);
+        AnimateSurfaceWidth(IslandSurface.ActualWidth, HeightDip, _collapseDuration, TimeSpan.Zero);
         AnimateOpacity(0, _disappearOpacityDuration, _collapseDuration);
         AnimateScale(HiddenScale, _disappearScaleDuration, _collapseDuration);
         batch.End();
@@ -172,12 +172,12 @@ public sealed partial class PopupWindow : Window
         };
     }
 
-    // Composition drops a rounded clip on the acrylic and on its ancestors, so the round shape comes from the acrylic's own
+    // Composition drops a rounded clip on the acrylic and on its ancestors, so the round shape comes from the surface's own
     // size and corner radius. Its width is layout, so the clip and the content follow it to stay on the same frame.
-    private void AnimateBackdropWidth(double from, double to, TimeSpan duration, TimeSpan delay)
+    private void AnimateSurfaceWidth(double from, double to, TimeSpan duration, TimeSpan delay)
     {
         _widthAnimation?.Stop();
-        IslandBackdrop.Width = from;
+        IslandSurface.Width = from;
         var frames = new DoubleAnimationUsingKeyFrames { EnableDependentAnimation = true, BeginTime = delay };
         frames.KeyFrames.Add(new SplineDoubleKeyFrame
         {
@@ -185,14 +185,14 @@ public sealed partial class PopupWindow : Window
             Value = to,
             KeySpline = new KeySpline { ControlPoint1 = new Point(0.2, 0), ControlPoint2 = new Point(0, 1) },
         });
-        Storyboard.SetTarget(frames, IslandBackdrop);
+        Storyboard.SetTarget(frames, IslandSurface);
         Storyboard.SetTargetProperty(frames, "Width");
         _widthAnimation = new Storyboard();
         _widthAnimation.Children.Add(frames);
         _widthAnimation.Begin();
     }
 
-    private void FollowBackdropWidth(double width)
+    private void FollowSurfaceWidth(double width)
     {
         float left = (WidthDip - (float)width) / 2;
         _clip.Left = left;
@@ -228,7 +228,7 @@ public sealed partial class PopupWindow : Window
         _animationVersion++;
         AnimateOpacity(1, _appearOpacityDuration, TimeSpan.Zero);
         AnimateScale(1, _appearScaleDuration, TimeSpan.Zero);
-        AnimateBackdropWidth(fromWidth, WidthDip, _spreadDuration, spreadDelay);
+        AnimateSurfaceWidth(fromWidth, WidthDip, _spreadDuration, spreadDelay);
     }
 
     private async Task LoadThumbnailAsync(IRandomAccessStreamReference? thumbnail)
