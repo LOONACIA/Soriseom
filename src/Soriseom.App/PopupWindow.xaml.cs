@@ -41,6 +41,7 @@ public sealed partial class PopupWindow : Window
     private readonly Visual _contentVisual;
     private readonly RectangleClip _clip;
     private readonly CompositionEasingFunction _easing;
+    private readonly PopupAcrylicBackdrop? _acrylic;
     private Storyboard? _widthAnimation;
     private bool _isVisible;
     private bool _isClosing;
@@ -60,9 +61,12 @@ public sealed partial class PopupWindow : Window
         _islandVisual.CenterPoint = new Vector3(WidthDip / 2f, HeightDip / 2f, 0);
         _easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0), new Vector2(0, 1));
         IslandSurface.SizeChanged += (_, args) => FollowSurfaceWidth(args.NewSize.Width);
-        if (DesktopAcrylicController.IsSupported())
+
+        // The mask over the acrylic needs a newer Windows than the app's minimum, so older versions get the solid fallback.
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362) && DesktopAcrylicController.IsSupported())
         {
-            IslandBackdrop.SystemBackdrop = new PopupAcrylicBackdrop();
+            _acrylic = new PopupAcrylicBackdrop();
+            IslandBackdrop.SystemBackdrop = _acrylic;
         }
         else
         {
@@ -194,6 +198,11 @@ public sealed partial class PopupWindow : Window
 
     private void FollowSurfaceWidth(double width)
     {
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362))
+        {
+            _acrylic?.SetWidth((float)width);
+        }
+
         float left = (WidthDip - (float)width) / 2;
         _clip.Left = left;
         _clip.Right = WidthDip - left;

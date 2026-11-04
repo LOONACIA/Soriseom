@@ -557,7 +557,7 @@ function Get-RedBandDistance($Pixel) {
 }
 
 # The share of rows on the left curve of the pill where the step from the band takes more than one pixel.
-# The acrylic's own rounded edge is a hard stair step, so without the rim over it this is zero.
+# The acrylic's own corner radius leaves a hard stair step, so without the alpha mask this is zero.
 function Get-PopupEdgeSoftness($Bitmap) {
     $rows = 0
     $softRows = 0

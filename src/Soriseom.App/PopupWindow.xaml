@@ -4,34 +4,18 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Background="Transparent">
-        <Grid.Resources>
-            <ResourceDictionary>
-                <ResourceDictionary.ThemeDictionaries>
-                    <ResourceDictionary x:Key="Default">
-                        <SolidColorBrush x:Key="PopupRimBrush" Color="#FF383838" />
-                    </ResourceDictionary>
-                    <ResourceDictionary x:Key="Light">
-                        <SolidColorBrush x:Key="PopupRimBrush" Color="#FFE0E0E0" />
-                    </ResourceDictionary>
-                    <ResourceDictionary x:Key="HighContrast">
-                        <SolidColorBrush x:Key="PopupRimBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-                    </ResourceDictionary>
-                </ResourceDictionary.ThemeDictionaries>
-            </ResourceDictionary>
-        </Grid.Resources>
         <Viewbox>
             <Grid x:Name="Island" Width="360" Height="80">
                 <Grid x:Name="IslandSurface" Width="80" HorizontalAlignment="Center">
-                    <SystemBackdropElement x:Name="IslandBackdrop" Margin="1" CornerRadius="39" />
+                    <SystemBackdropElement x:Name="IslandBackdrop" />
                     <Border
                         x:Name="SolidFallback"
-                        Margin="1"
                         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                        CornerRadius="39"
+                        CornerRadius="40"
                         Visibility="Collapsed" />
                     <Border
-                        BorderBrush="{ThemeResource PopupRimBrush}"
-                        BorderThickness="2"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
                         CornerRadius="40" />
                 </Grid>
                 <Grid x:Name="IslandForeground">

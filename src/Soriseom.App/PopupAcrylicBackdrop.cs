@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
@@ -9,6 +10,7 @@ namespace Soriseom.App;
 /// <summary>
 /// Desktop acrylic that stays on in an inactive window. The popup never takes focus, and DesktopAcrylicBackdrop shows a flat color when the window is inactive.
 /// </summary>
+[SupportedOSPlatform("windows10.0.18362.0")]
 internal sealed partial class PopupAcrylicBackdrop : SystemBackdrop
 {
     // The system's opacities (0.85 light, 0.96 dark) let almost nothing of a dark screen through.
@@ -19,7 +21,11 @@ internal sealed partial class PopupAcrylicBackdrop : SystemBackdrop
     private static readonly Color _lightTint = Color.FromArgb(255, 0xFC, 0xFC, 0xFC);
     private static readonly Color _darkTint = Color.FromArgb(255, 0x2C, 0x2C, 0x2C);
     private readonly SystemBackdropConfiguration _configuration = new() { IsInputActive = true };
+    private readonly PillAlphaMask _mask = new();
     private DesktopAcrylicController? _controller;
+    private MaskedBackdropTarget? _maskedTarget;
+
+    public void SetWidth(float widthDip) => _mask.SetWidth(widthDip);
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
     {
@@ -28,7 +34,8 @@ internal sealed partial class PopupAcrylicBackdrop : SystemBackdrop
         _controller = new DesktopAcrylicController();
         CopyDisplayState(connectedTarget, xamlRoot);
         _controller.SetSystemBackdropConfiguration(_configuration);
-        _controller.AddSystemBackdropTarget(connectedTarget);
+        _maskedTarget = new MaskedBackdropTarget(connectedTarget, _mask);
+        _controller.AddSystemBackdropTarget(_maskedTarget);
     }
 
     protected override void OnDefaultSystemBackdropConfigurationChanged(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
@@ -38,9 +45,10 @@ internal sealed partial class PopupAcrylicBackdrop : SystemBackdrop
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop disconnectedTarget)
     {
-        _controller?.RemoveSystemBackdropTarget(disconnectedTarget);
+        _controller?.RemoveSystemBackdropTarget(_maskedTarget);
         _controller?.Dispose();
         _controller = null;
+        _maskedTarget = null;
         base.OnTargetDisconnected(disconnectedTarget);
     }
 
