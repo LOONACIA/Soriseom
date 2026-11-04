@@ -2,7 +2,7 @@ id: popup-acrylic
 goal: >
   팝업 알약의 배경을 단색에서 Acrylic으로 바꿔 docs/PRD.md "2. 팝업 모양과 동작"을 충족한다. 뒤 화면이 흐리게 비치고, 시스템 라이트/다크를 따르고, 알약 바깥은 지금처럼 투명하다.
   작은 원에서 펴지고 다시 접히는 애니메이션, 클릭 통과, 포커스 유지, 6곳 위치, 크기 설정, 표시 시간은 그대로다. 스모크 스크립트의 media 시나리오가 팝업 뒤가 실제로 비치는지 확인한다.
-  실제 앱에서 보고된 두 문제도 고친다: 알약 가장자리가 계단처럼 보이지 않고, 어두운 화면에서도 Acrylic이 비쳐 보인다. 스모크는 가장자리도 확인한다.
+  실제 앱에서 보고된 문제도 고친다: 알약 가장자리가 계단처럼 보이지 않고, 어두운 화면에서도 Acrylic이 비쳐 보이며, Acrylic이 알약 끝까지 차서 테두리 같은 띠가 남지 않는다. 스모크는 가장자리도 확인한다.
   완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 Debug, Release MSIX 생성이 통과하는 상태다. 창 그림자, 새 설정 항목, 다른 항상 위 창과의 앞뒤 순서, Windows 10 확인은 이 계획 밖이다.
 approved: true
 max_attempts: 3
@@ -571,3 +571,221 @@ steps:
       - 'dotnet build Soriseom.slnx -p:Platform=x64'
       - 'dotnet test --project tests/Soriseom.Core.Tests'
       - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s5-popup-edge-mask
+    title: fade the acrylic edge with a mask instead of an opaque rim
+    type: fix
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "구조 규칙", "주의"), docs/ARCHITECTURE.md("창과 셸 연동 (App)"의 **팝업 창** 항목), `src/Soriseom.App/PopupAcrylicBackdrop.cs`,
+      `src/Soriseom.App/TransparentBackdrop.cs`, `src/Soriseom.App/PopupWindow.xaml`, `src/Soriseom.App/PopupWindow.xaml.cs`, `tools/smoke/Smoke.ps1`(`Get-PopupEdgeSoftness`).
+
+      목표: 이전 스텝의 2 DIP 불투명 테두리를 없앤다. 사용자가 실제 앱에서 "Acrylic이 팝업 전체를 채우지 않고 약간의 공간이 남아 테두리처럼 보인다"고 보고했다. Acrylic이 알약 끝까지 차면서 가장자리는 계단 없이 매끄러워야 한다.
+
+      2026-11-04에 임시 WinUI 창(WindowsAppSDK 2.6.4, Windows 11, 배율 100%)에서 이 스텝과 같은 구조로 시험한 결과다. 아래 설계는 이 결과에서 나왔으니 다른 방식으로 바꾸지 마라.
+      - `DesktopAcrylicController.AddSystemBackdropTarget`에 C#으로 구현한 `ICompositionSupportsSystemBackdrop`을 넘기면 컨트롤러가 그 객체의 `SystemBackdrop`에 브러시를 넣는다. 트리밍한 Release publish에서도 동작했다.
+      - 이 브러시를 `CompositionMaskBrush.Source`로 쓸 수 있다. 활성 상태의 `CompositionEffectBrush`와 대체 경로의 `CompositionColorBrush` 모두 받아들였고, 비활성 구성으로 단색이 되어도 가장자리가 매끄러웠다.
+      - `Compositor.CreateHostBackdropBrush()`는 마스크의 Source로 쓸 수 없다("Unsupported source brush type"). `AddSystemBackdropTarget(connectedTarget)` 직후 `connectedTarget.SystemBackdrop`을 읽으면 null이라 나중에 감쌀 수 없다.
+      - `CompositionNineGridBrush`를 마스크로 쓰면 끝이 둥글게 유지되지 않고 타원으로 늘어난다. `CompositionVisualSurface`의 `ShapeVisual` 둥근 사각형은 가장자리가 계단이다.
+        반면 `SpriteVisual`에 그라디언트를 입혀 경계에서 알파를 0으로 줄이면 매끄럽다. 스크린샷 지표(아래 스텝 설명의 `Get-PopupEdgeSoftness`와 같은 계산)가 라이트 90% 82%, 라이트 70% 73%, 다크 90% 77%였고 계단 가장자리는 0%다.
+      - 폭 Storyboard를 그대로 두고 `SizeChanged`에서 마스크 크기를 맞추면, 5배 느리게 돌린 프레임에서 Acrylic, 내용의 clip이 어긋나지 않았다. 실행 중 테마 전환도 정상이었다.
+      - 원래 있던 1 DIP `CardStrokeColorDefaultBrush` 선을 Acrylic 위에 두면 어두운 배경과 컬러 배경에서는 없을 때와 거의 같고, 흰 배경에서는 라이트 테마 알약의 윤곽을 살려 준다. 이 선 아래로 Acrylic이 비치므로 띠로 보이지 않는다.
+
+      ## 1. `src/Soriseom.App/PillAlphaMask.cs` (새 파일)
+      아래 내용 그대로 만든다. 분석기나 포맷 위반이 나면 동작을 바꾸지 말고 표기만 고쳐라.
+      ```csharp
+      using System.Numerics;
+      using Windows.UI;
+      using Windows.UI.Composition;
+
+      namespace Soriseom.App;
+
+      /// <summary>
+      /// Masks a brush to the popup's pill. The corner radius of SystemBackdropElement and shapes in a visual surface both leave a hard stair step edge, so the alpha fades out by gradient instead.
+      /// </summary>
+      internal sealed class PillAlphaMask
+      {
+          // Drawn at twice the layout size so the edge holds up on high DPI screens.
+          private const float Scale = 2;
+          private const float HeightDip = 80;
+          private const float RadiusDip = HeightDip / 2;
+          private const float FadeDip = 1.2f;
+          private static readonly Color _opaque = Color.FromArgb(255, 255, 255, 255);
+          private static readonly Color _clear = Color.FromArgb(0, 255, 255, 255);
+          private ContainerVisual? _root;
+          private SpriteVisual? _body;
+          private SpriteVisual? _rightCap;
+          private CompositionVisualSurface? _surface;
+          private float _widthDip = HeightDip;
+
+          public CompositionBrush Apply(CompositionBrush source)
+          {
+              var compositor = source.Compositor;
+              if (_surface is null)
+              {
+                  CreateVisuals(compositor);
+              }
+
+              var maskSurface = compositor.CreateSurfaceBrush(_surface);
+              maskSurface.Stretch = CompositionStretch.Fill;
+              var mask = compositor.CreateMaskBrush();
+              mask.Source = source;
+              mask.Mask = maskSurface;
+              return mask;
+          }
+
+          public void SetWidth(float widthDip)
+          {
+              _widthDip = widthDip;
+              if (_surface is null)
+              {
+                  return;
+              }
+
+              var size = new Vector2(widthDip * Scale, HeightDip * Scale);
+              _root!.Size = size;
+              _body!.Size = new Vector2((widthDip - (2 * RadiusDip)) * Scale, HeightDip * Scale);
+              _rightCap!.Offset = new Vector3((widthDip - RadiusDip) * Scale, 0, 0);
+              _surface.SourceSize = size;
+          }
+
+          private void CreateVisuals(Compositor compositor)
+          {
+              var body = compositor.CreateLinearGradientBrush();
+              body.StartPoint = new Vector2(0, 0);
+              body.EndPoint = new Vector2(0, 1);
+              body.ColorStops.Add(compositor.CreateColorGradientStop(0, _clear));
+              body.ColorStops.Add(compositor.CreateColorGradientStop(FadeDip / HeightDip, _opaque));
+              body.ColorStops.Add(compositor.CreateColorGradientStop(1 - (FadeDip / HeightDip), _opaque));
+              body.ColorStops.Add(compositor.CreateColorGradientStop(1, _clear));
+              _body = compositor.CreateSpriteVisual();
+              _body.Brush = body;
+              _body.Offset = new Vector3(RadiusDip * Scale, 0, 0);
+              _rightCap = CreateCap(compositor, new Vector2(0, 0.5f));
+              _root = compositor.CreateContainerVisual();
+              _root.Children.InsertAtTop(CreateCap(compositor, new Vector2(1, 0.5f)));
+              _root.Children.InsertAtTop(_body);
+              _root.Children.InsertAtTop(_rightCap);
+              _surface = compositor.CreateVisualSurface();
+              _surface.SourceVisual = _root;
+              SetWidth(_widthDip);
+          }
+
+          private static SpriteVisual CreateCap(Compositor compositor, Vector2 center)
+          {
+              var brush = compositor.CreateRadialGradientBrush();
+              brush.EllipseCenter = center;
+              brush.EllipseRadius = new Vector2(1, 0.5f);
+              brush.ColorStops.Add(compositor.CreateColorGradientStop(1 - (FadeDip / RadiusDip), _opaque));
+              brush.ColorStops.Add(compositor.CreateColorGradientStop(1, _clear));
+              var cap = compositor.CreateSpriteVisual();
+              cap.Brush = brush;
+              cap.Size = new Vector2(RadiusDip * Scale, HeightDip * Scale);
+              return cap;
+          }
+      }
+      ```
+
+      ## 2. `src/Soriseom.App/MaskedBackdropTarget.cs` (새 파일)
+      아래 내용 그대로 만든다. `partial`을 빼지 마라. 이유: 트리밍한 Release에서 WinRT로 넘길 코드를 소스 생성기가 만든다.
+      ```csharp
+      using Microsoft.UI.Composition;
+
+      namespace Soriseom.App;
+
+      /// <summary>
+      /// Stands between DesktopAcrylicController and the real target, so every brush the controller sets, its flat color fallback included, gets the pill mask.
+      /// </summary>
+      internal sealed partial class MaskedBackdropTarget : ICompositionSupportsSystemBackdrop
+      {
+          private readonly ICompositionSupportsSystemBackdrop _target;
+          private readonly PillAlphaMask _mask;
+          private Windows.UI.Composition.CompositionBrush? _brush;
+
+          public MaskedBackdropTarget(ICompositionSupportsSystemBackdrop target, PillAlphaMask mask)
+          {
+              _target = target;
+              _mask = mask;
+          }
+
+          public Windows.UI.Composition.CompositionBrush? SystemBackdrop
+          {
+              get => _brush;
+              set
+              {
+                  _brush = value;
+                  _target.SystemBackdrop = value is null ? null : _mask.Apply(value);
+              }
+          }
+      }
+      ```
+
+      ## 3. `src/Soriseom.App/PopupAcrylicBackdrop.cs`
+      - 필드 추가: `private readonly PillAlphaMask _mask = new();`(`_configuration` 다음), `private MaskedBackdropTarget? _maskedTarget;`(`_controller` 다음).
+      - 공개 메서드 추가: `public void SetWidth(float widthDip) => _mask.SetWidth(widthDip);`
+      - `OnTargetConnected`에서 `_controller.AddSystemBackdropTarget(connectedTarget);`를 다음 두 줄로 바꾼다.
+        ```csharp
+        _maskedTarget = new MaskedBackdropTarget(connectedTarget, _mask);
+        _controller.AddSystemBackdropTarget(_maskedTarget);
+        ```
+      - `OnTargetDisconnected`에서 `_controller?.RemoveSystemBackdropTarget(disconnectedTarget);`를 `_controller?.RemoveSystemBackdropTarget(_maskedTarget);`로 바꾸고, `_controller = null;` 다음에 `_maskedTarget = null;`을 넣는다.
+      - 농도 상수, 색 필드, `CopyDisplayState`는 고치지 마라. 이유: 사용자가 고른 값이고 이 스텝과 상관없다.
+
+      ## 4. `src/Soriseom.App/PopupWindow.xaml`
+      - 루트 `Grid`의 `<Grid.Resources>` 전체를 지운다. 이유: `PopupRimBrush`를 더 쓰지 않는다.
+      - `IslandSurface`를 다음으로 바꾼다. `IslandForeground`와 `ContentRow`는 고치지 마라.
+        ```xml
+        <Grid x:Name="IslandSurface" Width="80" HorizontalAlignment="Center">
+            <SystemBackdropElement x:Name="IslandBackdrop" />
+            <Border
+                x:Name="SolidFallback"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                CornerRadius="40"
+                Visibility="Collapsed" />
+            <Border
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="40" />
+        </Grid>
+        ```
+        `SystemBackdropElement`에 `CornerRadius`나 `Margin`을 두지 마라. 이유: 둥근 모양은 마스크가 만들고, `CornerRadius`를 두면 계단이 다시 생긴다.
+
+      ## 5. `src/Soriseom.App/PopupWindow.xaml.cs`
+      - 필드 추가: `private readonly PopupAcrylicBackdrop? _acrylic;`(다른 readonly 인스턴스 필드 옆).
+      - 생성자의 `IslandBackdrop.SystemBackdrop = new PopupAcrylicBackdrop();`를 다음 두 줄로 바꾼다.
+        ```csharp
+        _acrylic = new PopupAcrylicBackdrop();
+        IslandBackdrop.SystemBackdrop = _acrylic;
+        ```
+      - `FollowSurfaceWidth`의 첫 줄에 `_acrylic?.SetWidth((float)width);`를 넣는다.
+      - 애니메이션의 시간, 이징, 공개 메서드 시그니처는 그대로 둔다.
+
+      ## 6. docs/ARCHITECTURE.md
+      **팝업 창** 항목에서 다음 두 문장을
+      `SystemBackdropElement`의 둥근 가장자리는 안티앨리어싱되지 않아 계단처럼 보이므로, 불투명한 2 DIP 테두리를 그 위에 겹쳐 가립니다. Composition의 둥근 clip은 Acrylic과 그 조상에서 무시되므로, 작은 원은 Acrylic과 테두리를 담은 `IslandSurface`의 폭으로 만들고 내용의 clip이 그 폭을 따라갑니다.
+      이렇게 바꾼다.
+      `SystemBackdropElement`의 `CornerRadius`는 가장자리가 계단처럼 끊기고 Composition의 둥근 clip은 Acrylic과 그 조상에서 무시되므로, Acrylic 브러시에 알약 모양 알파 마스크(`PillAlphaMask`)를 씌웁니다. 컨트롤러가 브러시를 넣을 때마다 마스크를 입히도록 컨트롤러와 실제 대상 사이에 `MaskedBackdropTarget`을 둡니다. 비주얼 서피스에 그린 도형도 가장자리가 끊기므로 마스크의 경계는 그라디언트로 만듭니다. 계단을 불투명 테두리로 가리면 Acrylic이 없는 띠가 보여서 쓰지 않습니다. 작은 원은 `IslandSurface`의 폭으로 만들고 마스크와 내용의 clip이 그 폭을 따라갑니다.
+
+      ## 7. `tools/smoke/Smoke.ps1`
+      파일 편집 도구로만 고치고 실행하지 마라. 이유: `.codex/hooks/guard.py`가 `tools/smoke/` 경로가 들어간 셸 명령을 막는다.
+      `Get-PopupEdgeSoftness` 위의 주석 `# The acrylic's own rounded edge is a hard stair step, so without the rim over it this is zero.`을 `# The acrylic's own corner radius leaves a hard stair step, so without the alpha mask this is zero.`로 바꾼다. 판정과 기준은 고치지 마라.
+
+      ## 하지 말 것
+      - 불투명 또는 반투명 테두리로 가장자리를 가리지 마라. 이유: 사용자가 보고한 바로 그 문제다.
+      - `CompositionNineGridBrush`, `ShapeVisual`, `CreateHostBackdropBrush`, `SetWindowRgn`, Win2D, Direct2D를 쓰지 마라. 이유: 위 시험에서 실패했거나, 필요하지 않은 의존성이다.
+      - 폭 애니메이션을 Composition 애니메이션으로 옮기지 마라. 이유: 이 스텝은 마스크만 바꾸고, 시험한 것도 지금의 Storyboard 구조다.
+      - `TransparentBackdrop.cs`, `PopupController`, Core, 테스트를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.App/PillAlphaMask.cs
+      - src/Soriseom.App/MaskedBackdropTarget.cs
+      - src/Soriseom.App/PopupAcrylicBackdrop.cs
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - docs/ARCHITECTURE.md
+      - tools/smoke/Smoke.ps1
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
