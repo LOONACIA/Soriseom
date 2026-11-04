@@ -5,16 +5,16 @@
 
 .DESCRIPTION
     Runs on the live desktop: windows appear and can take focus, and the dev package is registered again.
-    Starts from default settings and restores the user's settings and startup state when it ends, including
+    Starts from default settings and restores the user's settings, startup state and do not disturb when it ends, including
     on the next run if this one dies.
 
     Only Claude runs this. Codex must not, see docs/ADR.md ADR-009.
 
     Exit codes: 0 all checks passed, 1 a check failed, 3 this desktop cannot run the checks right now
-    (locked, full-screen, or other media playback holds the current session), which says nothing about the code.
+    (locked, full-screen, do not disturb, or other media playback holds the current session), which says nothing about the code.
 
 .PARAMETER Scenario
-    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, tray.
+    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, dnd, tray.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Debug; Release is the trimmed build users receive.
@@ -30,7 +30,7 @@
     pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Scenario language,media
 #>
 param(
-    [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,tray',
+    [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,dnd,tray',
     [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Debug',
     [switch] $AfterSignIn,
     [string] $OutDir
@@ -83,6 +83,11 @@ $SecondTrack = 'SmokeTrackB'
 $StartupDisabled = 0
 $StartupDisabledByUser = 1
 $StartupEnabled = 2
+
+# Windows Settings has the only way to change do not disturb: no public API sets it.
+$DoNotDisturbSwitchId = 'SystemSettings_Notifications_QuietHours_MuteNotification_Enabled_ToggleSwitch'
+# Exists only while this script holds do not disturb on, so the next run can undo it if this one dies.
+$DoNotDisturbMarker = Join-Path $BackupDir 'do-not-disturb-on.txt'
 
 $Ae = [System.Windows.Automation.AutomationElement]
 $Scope = [System.Windows.Automation.TreeScope]
@@ -143,6 +148,28 @@ function Set-PackagePaths([string] $FamilyName) {
     $script:Aumid = "$FamilyName!App"
     $script:SettingsFile = Join-Path $env:LOCALAPPDATA "Packages\$FamilyName\Settings\settings.dat"
     $script:StartupKey = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\$FamilyName\$StartupTaskId"
+}
+
+function Get-NotificationMode {
+    $helper = Join-Path $PSScriptRoot 'NotificationMode.ps1'
+    return (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper).Trim()
+}
+
+function Test-DoNotDisturbOn {
+    return (Get-NotificationMode) -ne 'Unrestricted'
+}
+
+function Set-DoNotDisturb([bool] $On) {
+    Start-Process 'ms-settings:notifications'
+    # Not named $condition: variables are case-insensitive, and Wait-For has a parameter called $Condition.
+    $byId = [System.Windows.Automation.PropertyCondition]::new($Ae::AutomationIdProperty, $DoNotDisturbSwitchId)
+    $element = Wait-For { $Ae::RootElement.FindFirst($Scope::Descendants, $byId) } 20000
+    if (-not $element) { throw 'the do not disturb switch was not found in Windows Settings' }
+
+    $toggle = $element.GetCurrentPattern($TogglePattern)
+    if (($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) -ne $On) { $toggle.Toggle() }
+    Get-Process SystemSettings -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }
+    if (-not (Wait-For { (Test-DoNotDisturbOn) -eq $On })) { throw "do not disturb did not change to $On" }
 }
 
 function Get-StartupState {
@@ -207,6 +234,7 @@ function Restore-UserState {
         Remove-Item $script:StartupKey -Force -ErrorAction SilentlyContinue
     }
 
+    if (Test-Path $DoNotDisturbMarker) { Set-DoNotDisturb $false }
     Remove-Item $BackupDir -Recurse -Force
     Write-Line 'restored the settings and startup state from before this run'
 }
@@ -496,7 +524,7 @@ function Start-BackdropFixture {
 }
 
 # Returns what the popup of each fixture track did, or nothing when this desktop cannot judge them.
-function Watch-FixtureTracks([string] $ScreenshotName) {
+function Watch-FixtureTracks([string] $ScreenshotName, [switch] $AllowDoNotDisturb) {
     # The app starts watching media just after it shows the window, and by design a track that is
     # already playing at that point gets no popup.
     Start-Sleep -Seconds 2
@@ -526,6 +554,8 @@ function Watch-FixtureTracks([string] $ScreenshotName) {
         $reason = 'other media playback took over as the current session, so the media checks say nothing; stop it and run again'
     } elseif ($first.FullScreen -or $second.FullScreen) {
         $reason = 'an app went full-screen during the media checks, and the app hides popups then by design; run again without it'
+    } elseif (-not $AllowDoNotDisturb -and (Test-DoNotDisturbOn)) {
+        $reason = 'do not disturb is on, and the app hides popups then by design; turn it off and run again'
     }
 
     if ($reason) {
@@ -655,6 +685,30 @@ function Test-PopupSize {
     $slider.SetValue(90)
 }
 
+function Test-DoNotDisturb {
+    if (Test-DoNotDisturbOn) {
+        $script:UnavailableReason = 'do not disturb is already on, and this scenario has to turn it on itself; turn it off and run again'
+        Write-Line "SKIP dnd: $($script:UnavailableReason)"
+        return
+    }
+
+    Open-Settings
+    Set-Content $DoNotDisturbMarker ''
+    try {
+        Set-DoNotDisturb $true
+        $hidden = Watch-FixtureTracks -AllowDoNotDisturb
+    } finally {
+        Set-DoNotDisturb $false
+        Remove-Item $DoNotDisturbMarker -Force
+    }
+
+    if (-not $hidden) { return }
+    Check 'do not disturb hides the popup' (-not $hidden.First.Shown -and -not $hidden.Second.Shown)
+
+    $shown = Watch-FixtureTracks
+    if ($shown) { Check 'the popup shows again after do not disturb ends' $shown.First.Shown }
+}
+
 function Get-TaskbarPart([string] $ClassName) {
     $condition = [System.Windows.Automation.PropertyCondition]::new($Ae::ClassNameProperty, $ClassName)
     $Ae::RootElement.FindFirst($Scope::Children, $condition)
@@ -742,6 +796,7 @@ $scenarios = [ordered]@{
     language = { Test-Language }
     media = { Test-Media }
     popupsize = { Test-PopupSize }
+    dnd = { Test-DoNotDisturb }
     tray = { Test-Tray }
 }
 $selected = $Scenario -split ','
