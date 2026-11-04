@@ -471,6 +471,30 @@ function Watch-Popup([string] $Title, [string] $ScreenshotName) {
     return $seen
 }
 
+# A red and blue band behind the top center of the work area, where the popup of the fixture tracks appears.
+# Not topmost: the popup would stay under it.
+function Start-BackdropFixture {
+    $workArea = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+    $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+    $width = [int](480 * $dpiScale)
+    $height = [int](112 * $dpiScale)
+    $x = [int](($workArea.Left + $workArea.Right - $width) / 2)
+    $readyPath = Join-Path $OutDir 'backdrop-fixture.txt'
+    Remove-Item $readyPath -Force -ErrorAction SilentlyContinue
+    $fixturePath = Join-Path $PSScriptRoot 'BackdropFixture.ps1'
+    $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
+        '-X', $x, '-Y', $workArea.Top, '-Width', $width, '-Height', $height, '-ReadyPath', "`"$readyPath`"")
+    if (-not (Wait-For { Test-Path $readyPath })) {
+        Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue
+        throw 'the backdrop fixture did not start'
+    }
+
+    Remove-Item $readyPath -Force
+    return $fixture
+}
+
 # Returns what the popup of each fixture track did, or nothing when this desktop cannot judge them.
 function Watch-FixtureTracks([string] $ScreenshotName) {
     # The app starts watching media just after it shows the window, and by design a track that is
@@ -480,6 +504,7 @@ function Watch-FixtureTracks([string] $ScreenshotName) {
     $statusPath = Join-Path $OutDir 'media-fixture.txt'
     Remove-Item $statusPath -Force -ErrorAction SilentlyContinue
     $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
+    $backdrop = Start-BackdropFixture
     $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
         '-AppId', $FixtureAppId, '-FirstTitle', $FirstTrack, '-SecondTitle', $SecondTrack,
@@ -490,6 +515,7 @@ function Watch-FixtureTracks([string] $ScreenshotName) {
         [void]$fixture.WaitForExit(15000)
     } finally {
         if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force }
+        Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue
     }
 
     if (-not (Test-Path $statusPath)) { throw 'the media fixture wrote no status' }
@@ -525,6 +551,36 @@ function Test-PopupBounds($Bounds, [int] $SizePercent) {
     Check "the $SizePercent% popup is that share of 360x80 DIP" ([Math]::Abs($Bounds.Right - $Bounds.Left - 360 * $sizeScale) -le 2 -and [Math]::Abs($Bounds.Bottom - $Bounds.Top - 80 * $sizeScale) -le 2) $edges
 }
 
+# Acrylic lets the two colors of the band through, and a solid background looks the same on both sides.
+function Test-PopupAcrylic([string] $ScreenshotName) {
+    $path = Join-Path $OutDir "$ScreenshotName.png"
+    if (-not (Test-Path $path)) {
+        Check 'the popup lets what is behind it show through' $false 'no screenshot was taken'
+        return
+    }
+
+    $bitmap = [System.Drawing.Bitmap]::new($path)
+    try {
+        # The corners are outside the pill, so they show the band unless another window covers it.
+        $red = [System.Drawing.Color]::Red.ToArgb()
+        $blue = [System.Drawing.Color]::Blue.ToArgb()
+        if ($bitmap.GetPixel(0, 0).ToArgb() -ne $red -or $bitmap.GetPixel($bitmap.Width - 1, 0).ToArgb() -ne $blue) {
+            $script:UnavailableReason = 'another window covered the popup backdrop, so the acrylic check says nothing; run again without it'
+            Write-Line "SKIP acrylic: $script:UnavailableReason"
+            return
+        }
+
+        # Above the text and right of the album art.
+        $row = [int]($bitmap.Height * 0.12)
+        $left = $bitmap.GetPixel([int]($bitmap.Width * 0.25), $row)
+        $right = $bitmap.GetPixel([int]($bitmap.Width * 0.75), $row)
+        $difference = ([Math]::Abs($left.R - $right.R), [Math]::Abs($left.G - $right.G), [Math]::Abs($left.B - $right.B) | Measure-Object -Maximum).Maximum
+        Check 'the popup lets what is behind it show through' ($difference -ge 16) "left ($($left.R),$($left.G),$($left.B)), right ($($right.R),$($right.G),$($right.B)); transparency effects or battery saver can also turn acrylic off"
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
 function Test-Media {
     $expectedName = (New-Object -ComObject Shell.Application).NameSpace('shell:AppsFolder').ParseName($FixtureAppId).Name
     Open-Settings
@@ -542,6 +598,7 @@ function Test-Media {
         # WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE
         $requiredStyles = 0x8 -bor 0x20 -bor 0x80 -bor 0x08000000
         Check 'the popup is topmost, click-through and hidden from Alt+Tab' (($first.ExStyle -band $requiredStyles) -eq $requiredStyles) ('extended style is 0x{0:X8}' -f $first.ExStyle)
+        Test-PopupAcrylic 'popup'
     }
 
     Check 'the next track shows the popup again' $second.Shown
