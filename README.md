@@ -30,6 +30,10 @@ Microsoft Store로 배포할 예정입니다.
 
 C# / .NET 10, WinUI 3 (Windows App SDK), MSIX
 
+### 개인정보 처리방침
+
+[PRIVACY.md](PRIVACY.md)
+
 ### 라이선스
 
 [MIT](LICENSE)
@@ -61,6 +65,10 @@ Will be distributed through the Microsoft Store.
 ### Tech stack
 
 C# / .NET 10, WinUI 3 (Windows App SDK), MSIX
+
+### Privacy
+
+[PRIVACY.md](PRIVACY.md)
 
 ### License
 

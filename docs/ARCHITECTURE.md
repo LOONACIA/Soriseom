@@ -11,6 +11,7 @@ Directory.Build.props       # 공통 빌드 설정: Nullable, 경고=오류, 분
 Directory.Packages.props    # NuGet 버전 중앙 관리(Central Package Management)
 .editorconfig               # 코드 스타일, 분석기 규칙 조정
 stylecop.json               # StyleCop 설정(using 위치 등)
+PRIVACY.md                  # 개인정보 처리방침. Partner Center에 이 파일의 URL을 넣음
 src/
 ├── Soriseom.Core/          # net10.0. 곡 변경 판단, 표시 여부 결정, 설정 모델. Windows API 참조 금지
 └── Soriseom.App/           # net10.0-windows10.0.26100.0, 최소 10.0.17763.0. WinUI 3 + MSIX
@@ -65,7 +66,7 @@ App: 팝업 창
 
 - **에러 처리**: GSMTC, 썸네일, 셸 API가 실패해도 앱이 종료되지 않습니다. 썸네일을 못 읽으면 음표 아이콘을 쓰고, 세션 정보를 못 읽으면 그 팝업만 건너뜁니다. 예외는 디버그 출력에 남깁니다.
 - **로깅**: `System.Diagnostics.Debug` 출력만 씁니다. 파일 로그와 네트워크 전송은 없습니다.
-- **설정 저장**: `ApplicationData.Current.LocalSettings`. 키 이름은 한 곳에 상수로 모읍니다.
+- **설정 저장**: `ApplicationData.Current.LocalSettings`. 키 이름은 한 곳에 상수로 모읍니다. 앱이 읽거나 저장하는 정보의 종류가 바뀌면 루트의 `PRIVACY.md`도 함께 고칩니다(Store 정책 10.5.1).
 - **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다. 언어 리소스는 번들의 기본 패키지에 넣습니다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store 번들에 한국어가 들어가지 않습니다.
 - **의존성**: Central Package Management로 버전을 고정합니다. 허용 목록은 `docs/ADR.md`의 "원칙"에 있습니다.
 - **품질 게이트**: `Directory.Build.props`에서 Nullable, `TreatWarningsAsErrors`(NU1901~NU1904, IL2104 제외), `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)을 켭니다. StyleCop 규칙 조정은 `docs/ADR.md` ADR-006을 따릅니다.
