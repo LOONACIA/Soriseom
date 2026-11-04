@@ -131,6 +131,8 @@ $ExchangeDir = Join-Path $AppProject 'bin\smoke-exchange'
 
 # Windows Settings is registered on every install, so the media session gets a resolvable app name.
 $FixtureAppId = 'windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel'
+# Store screenshots show this app's name in the list, and Edge's name is the same in every language.
+$StoreFixtureAppId = 'MSEdge'
 $FixtureArtist = 'SmokeArtist'
 $FirstTrack = 'SmokeTrackA'
 $SecondTrack = 'SmokeTrackB'
@@ -811,7 +813,7 @@ function Save-StoreScreenshots {
                 $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
                 $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
                     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
-                    '-AppId', $FixtureAppId, '-FirstTitle', "`"$($language.FirstTitle)`"", '-SecondTitle', "`"$($language.SecondTitle)`"",
+                    '-AppId', $StoreFixtureAppId, '-FirstTitle', "`"$($language.FirstTitle)`"", '-SecondTitle', "`"$($language.SecondTitle)`"",
                     '-Artist', "`"$($language.Artist)`"", '-ThumbnailPath', "`"$albumPath`"", '-StatusPath', "`"$statusPath`"")
                 $popup = Wait-For {
                     $candidate = Get-PopupWindow
@@ -835,7 +837,7 @@ function Save-StoreScreenshots {
                 Check "the $culture popup disappears before the settings capture" ([bool]$popupGone)
                 if (-not $popupGone) { continue }
 
-                $row = Wait-For { Get-SettingsElement $FixtureAppId }
+                $row = Wait-For { Get-SettingsElement $StoreFixtureAppId }
                 Check "the $culture settings show the demo app row" ([bool]$row)
                 if (-not $row) { continue }
                 $row.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView()
