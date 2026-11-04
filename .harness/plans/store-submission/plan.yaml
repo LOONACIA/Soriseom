@@ -1,0 +1,300 @@
+id: store-submission
+goal: >
+  Microsoft Store 첫 제출과 이후 자동 제출에 필요한 저장소 쪽 작업을 끝낸다. 스크립트가 Partner Center 패키지 식별 정보와 버전을 넣어 x64 `.msixupload`를 만들고,
+  GitHub Actions를 수동 실행하면 그 패키지를 아티팩트로 내려받을 수 있으며, `vX.Y.Z` 태그를 push하면 `msstore publish`로 제출한다(ADR-007).
+  스모크 스크립트의 `storeshots` 시나리오가 언어별 Store 스크린샷을 만들고, `docs/store-listing.md`에 최초 제출 순서, `runFullTrust` 사유, 인증 메모, 연령 등급 답변 근거, 스크린샷 캡션이 들어간다.
+  완료는 각 스텝의 AC가 통과하는 상태다. 워크플로 실행, Secrets 등록, Partner Center 작업, 실제 제출은 저장소 밖 작업이라 이 계획 밖이다. ARM64와 x86 패키지, 기호 패키지, 앱 코드 변경도 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-store-package
+    title: build the store upload package from a script
+    type: feat
+    scope: tools
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"), docs/ADR.md(ADR-003, ADR-007, ADR-010), docs/ARCHITECTURE.md("디렉토리 구조"),
+      src/Soriseom.App/Package.appxmanifest, tools/smoke/Smoke.ps1(맨 앞의 설명 주석과 `Build-Msix`, 스크립트 관례).
+
+      목표: Partner Center의 패키지 식별 정보와 버전을 넣어 Store 업로드 파일(`.msixupload`)을 만드는 스크립트와 그 검사 스크립트를 추가한다.
+      `Package.appxmanifest`는 저장소에서 계속 임시 ID `Soriseom.Dev`로 남고, 실제 값은 빌드하는 동안에만 들어간다.
+      이유: 스모크 스크립트와 개발 패키지가 이 임시 ID를 쓰고, ADR-007이 패키지 식별 정보를 저장소에 하드코딩하지 못하게 한다.
+
+      ## 1. `tools/store/Build-StorePackage.ps1`
+      `#Requires -Version 7`, `$ErrorActionPreference = 'Stop'`. 맨 앞에 영어 comment-based help를 둔다.
+      매개변수(모두 Mandatory, 형식 `[string]`): `-Version`(X.Y.Z), `-IdentityName`, `-Publisher`, `-PublisherDisplayName`, `-OutDir`.
+
+      순서:
+      1. 입력 검사. 하나라도 어기면 매니페스트를 건드리기 전에 throw한다.
+         - `Version`은 정규식 `^[1-9]\d*\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`에 맞고 세 부분 모두 65535 이하. 이유: Store 규칙이 첫 부분은 0일 수 없고 각 부분은 0~65535이며, 네 번째 부분은 0으로 둬야 한다.
+         - `Publisher`는 `CN=`으로 시작한다. `IdentityName`은 `Soriseom.Dev`가 아니다. 이유: Secret을 잘못 넣었을 때 업로드 전에 멈추기 위해서다.
+      2. `OutDir`을 만들고 절대 경로로 바꾼다(`New-Item -ItemType Directory -Force`, `Resolve-Path`). 이미 있어도 된다.
+      3. `src/Soriseom.App/Package.appxmanifest`(스크립트 위치 기준 경로)의 원본 바이트를 `[IO.File]::ReadAllBytes`로 저장한다.
+      4. `try` 안에서 XML을 `PreserveWhitespace = $true`로 읽어 `Package.Identity`의 `Name`, `Publisher`, `Version`("$Version.0")과 `Package.Properties.PublisherDisplayName`을 바꿔 저장한 뒤 아래 명령을 실행한다.
+         `dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false -p:UapAppxPackageBuildMode=StoreUpload -p:AppxBundle=Always -p:AppxBundlePlatforms=x64 -p:AppxSymbolPackageEnabled=false "-p:AppxPackageDir=<OutDir>\"`
+         출력은 `| Out-Host`로 보내고, `$LASTEXITCODE`가 0이 아니면 throw한다.
+      5. `finally`에서 원본 바이트를 `[IO.File]::WriteAllBytes`로 되돌린다. 이유: 로컬 실행 뒤 작업 트리가 깨끗해야 한다.
+      6. `OutDir` 바로 아래의 `*.msixupload`가 정확히 하나가 아니면 throw하고, 하나면 전체 경로만 `Write-Output`으로 출력한다. 이유: 낡은 패키지를 제출하지 않기 위해서다.
+
+      이 명령은 2026-11-05에 이 PC에서 성공했다. 결과는 `<OutDir>\Soriseom.App_1.0.0.0_x64_bundle.msixupload`이고 그 안에 `.msixbundle`이 있다.
+      `-p:AppxSymbolPackageEnabled=false`를 빼지 마라. 이유: `dotnet build`에는 `mspdbcmf.exe`가 없어 기호 변환 단계에서 MSB6011로 실패한다. 이 값을 넣어도 `mspdbcmf.exe` 경고는 남지만 빌드는 성공한다.
+
+      ## 2. `tools/store/Test-StorePackage.ps1`
+      매개변수 없음, `#Requires -Version 7`, `$ErrorActionPreference = 'Stop'`. 실패는 throw로 끝낸다(`-File` 실행에서 종료 코드가 0이 아니게 된다). 임시 폴더는 `[IO.Path]::GetTempPath()` 아래에 만들고 끝날 때 지운다.
+      다음을 검사한다.
+      1. 잘못된 입력이 모두 throw되고 매니페스트 바이트가 그대로다: `0.1.0`, `1.2`, `1.2.3.4`, `1.2.70000`, `v1.2.3`, `1.2.3-beta`, `01.2.3`, 그리고 `CN=` 없는 Publisher, `Soriseom.Dev` IdentityName. 이 경우들은 빌드하지 않으므로 빠르다.
+      2. 시험 값(`-Version 1.2.3 -IdentityName Test.Soriseom -Publisher CN=00000000-0000-0000-0000-000000000000 -PublisherDisplayName TestPublisher`)으로 빌드하면 스크립트가 돌려준 경로의 파일이 있다.
+         `.msixupload` 안의 `.msixbundle`에서 `AppxMetadata/AppxBundleManifest.xml`을 읽어 `Identity`의 `Name`, `Publisher`, `Version`(`1.2.3.0`)이 시험 값과 같음을 확인한다. 중첩 zip은 `[IO.Compression.ZipFile]::OpenRead`와 항목 스트림을 `MemoryStream`으로 복사한 `[IO.Compression.ZipArchive]`로 읽는다.
+      3. 빌드 뒤 매니페스트 바이트가 빌드 전과 같다.
+      4. 그 뒤 `dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false -p:AppxBundle=Never "-p:AppxPackageDir=<임시 폴더>\"`로 만든 `.msix`의 `AppxManifest.xml`에서 `Identity`의 `Name`이 `Soriseom.Dev`, `Version`이 `1.0.0.0`임을 확인한다.
+         이유: 스모크 스크립트가 같은 `obj` 폴더를 쓴다. 시험 값이 빌드 중간 산출물에 남으면 개발 패키지가 다른 ID로 등록된다. 이 검사가 실패하면 두 스크립트 쪽에서 해결하라. 테스트를 약화하지 마라.
+
+      ## 3. 문서
+      - CLAUDE.md "그 밖의 명령" 표의 `Release MSIX 생성(서명 없음)` 줄 바로 아래에 두 줄을 추가한다.
+        | Store 업로드 패키지 생성 | `pwsh -NoProfile -File tools/store/Build-StorePackage.ps1 -Version <X.Y.Z> -IdentityName <이름> -Publisher <CN=...> -PublisherDisplayName <표시 이름> -OutDir <폴더>` |
+        | Store 패키지 스크립트 검사 | `pwsh -NoProfile -File tools/store/Test-StorePackage.ps1` |
+      - docs/ARCHITECTURE.md "디렉토리 구조"의 `tools/` 아래에서 `└── smoke/`를 `├── smoke/`로 바꾸고 그 아래에 한 줄을 추가한다.
+        `└── store/                  # Store 업로드 패키지를 만드는 스크립트(패키지 식별 정보와 버전은 빌드할 때만 넣음)`
+
+      금지:
+      - `Package.appxmanifest`의 내용을 커밋되는 변경으로 바꾸지 마라. 이유: 위에 적은 대로 저장소에서는 임시 ID를 유지한다.
+      - `.csproj`, `Directory.Build.props`, `.github/workflows/`를 고치지 마라. 이유: 개발 빌드 설정을 바꾸지 않고, 워크플로는 s2에서 추가한다.
+      - 앱을 실행하거나 패키지를 등록하지 마라. 이유: ADR-009.
+      - 새 NuGet 패키지를 추가하지 마라. 이유: docs/ADR.md의 허용 목록.
+    expected_files:
+      - tools/store/Build-StorePackage.ps1
+      - tools/store/Test-StorePackage.ps1
+      - CLAUDE.md
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'pwsh -NoProfile -File tools/store/Test-StorePackage.ps1'
+      - 'git diff --exit-code -- src/Soriseom.App/Package.appxmanifest'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s2-store-release-workflow
+    title: submit the store package on a version tag
+    type: ci
+    description: |
+      먼저 읽을 파일: .github/workflows/ci.yml(사용 중인 action 버전과 명령), tools/store/Build-StorePackage.ps1(s1에서 추가), docs/ADR.md(ADR-003, ADR-007), docs/ARCHITECTURE.md("횡단 관심사"의 CI, "구현 전에 확인할 것").
+
+      목표: `.github/workflows/store-release.yml`을 추가한다. 태그 push는 패키지를 만들어 제출하고, 수동 실행은 패키지만 만든다. 수동 실행은 Partner Center 최초 제출에 쓸 파일을 얻는 경로다.
+      이유: Microsoft 문서 기준으로 GitHub Actions 자동 제출은 이미 게시된 앱에만 쓸 수 있어서 최초 제출은 사람이 파일을 올린다.
+
+      ## 1. 워크플로
+      - `name: Store release`
+      - 트리거: `push.tags: ["v[0-9]+.[0-9]+.[0-9]+"]`와 `workflow_dispatch`. `workflow_dispatch`에는 필수 문자열 입력 `version`(설명: `Package version as X.Y.Z`)을 둔다.
+      - `permissions: contents: read`
+      - job 하나: `package-and-submit`, `runs-on: windows-latest`. 스텝을 이 순서로 둔다.
+        1. `actions/checkout@v7`, `actions/setup-dotnet@v6`(`dotnet-version: 10.0.x`). ci.yml과 같은 버전이다.
+        2. `Build`, `Test`, `Check format`: ci.yml의 앞 세 명령과 똑같이 쓴다.
+        3. `Build store package`: env에 `RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}`, `PACKAGE_IDENTITY_NAME`, `PACKAGE_PUBLISHER`, `PACKAGE_PUBLISHER_DISPLAY_NAME`(각각 같은 이름의 secret)을 넣고,
+           `run`에서 `tools/store/Build-StorePackage.ps1 -Version ($env:RELEASE_VERSION -replace '^v', '') -IdentityName $env:PACKAGE_IDENTITY_NAME -Publisher $env:PACKAGE_PUBLISHER -PublisherDisplayName $env:PACKAGE_PUBLISHER_DISPLAY_NAME -OutDir store-package`를 실행한다.
+        4. `actions/upload-artifact@v7`: `name: store-package`, `path: store-package/*.msixupload`, `if-no-files-found: error`. 이유: 제출이 실패해도 패키지가 남는다.
+        5. `microsoft/microsoft-store-apppublisher@v1.4`, `with: version: v0.4.4`. `if: github.event_name == 'push'`. 이유: 미리보기 CLI이므로 버전을 고정한다. 2026-11-05 기준 최신 릴리스다.
+        6. `Configure Store CLI`, `if: github.event_name == 'push'`: env에 `TENANT_ID`, `SELLER_ID`, `CLIENT_ID`, `CLIENT_SECRET`(같은 이름의 secret)을 넣고 `msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET`를 실행한다.
+        7. `Submit to the Store`, `if: github.event_name == 'push'`: env에 `PRODUCT_ID`(같은 이름의 secret)를 넣고 `msstore publish (Get-Item store-package/*.msixupload).FullName --appId $env:PRODUCT_ID`를 실행한다.
+
+      굽히면 안 되는 규칙:
+      - secret과 `inputs.version`, `github.ref_name`을 `run` 문자열에 `${{ }}`로 직접 넣지 말고 반드시 env로 넘겨라. 이유: 스크립트 주입을 막는다.
+      - Secret 이름은 위 그대로 쓴다. `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET`, `SELLER_ID`, `PRODUCT_ID`는 저장소에 이미 등록돼 있고 나머지 셋은 사용자가 등록한다. Microsoft 문서 예시의 `AZURE_AD_*` 이름을 쓰지 마라.
+      - `msstore publish`에 `-i`를 쓰지 마라. 이유: 문서는 `--inputFile`이라 하지만 v0.4.4 소스에서 `-i`는 `--inputDirectory`다. 같은 소스의 `MSIXProjectPublisher`가 첫 인자로 받은 `.msixupload` 파일을 처리한다.
+      - `--noCommit`을 쓰지 마라. 이유: ADR-007은 태그가 곧 출시 결정이고 인증을 통과하면 게시한다.
+      - ci.yml을 고치지 마라. 이유: 그 트리거는 브랜치 push와 PR이라 태그에 돌지 않는다. job을 여럿으로 나누거나 재사용 워크플로를 만들지 마라. 이유: 한 곳에서만 쓴다.
+
+      ## 2. 문서
+      docs/ADR.md의 ADR-003 "트레이드오프"에서 `개발 중에는 임시 패키지 ID를 쓰다가 이름을 예약한 뒤 Partner Center의 값으로 바꿉니다.`를 다음으로 바꾼다.
+      `저장소의 매니페스트는 임시 패키지 ID를 유지하고, Store 패키지를 만들 때만 Partner Center의 값을 넣습니다(ADR-007).`
+
+      docs/ADR.md의 ADR-007 전체를 아래 내용으로 바꾼다. 내용을 바꾸지 말고 그대로 넣는다.
+
+      ### ADR-007: 릴리스 자동화는 태그 push → Store 제출 → 인증 통과 시 자동 게시
+
+      - **상태**: 채택(제출 도구는 2026-11-05 확정)
+      - **결정**: GitHub Actions에서 `vX.Y.Z` 태그를 push하면 빌드, 테스트, 패키지 버전 `X.Y.Z.0`의 `.msixupload` 생성, Store 제출을 차례로 진행하고, 인증을 통과하면 자동으로 게시합니다. 제출 도구는 Microsoft Store Developer CLI(`msstore publish`)입니다. 같은 워크플로를 수동 실행하면 제출하지 않고 패키지만 아티팩트로 만듭니다. 패키지는 x64만 올리고 기호 패키지는 넣지 않습니다.
+      - **이유**: 태그를 올리는 것 자체가 출시 결정이므로 수작업을 줄입니다. 스모크로 확인한 아키텍처는 x64뿐입니다. `dotnet build`에는 `mspdbcmf.exe`가 없어 기호 패키지를 만들지 못합니다(2026-11-05 확인).
+      - **트레이드오프**: 잘못 올린 태그도 인증만 통과하면 게시됩니다. Entra ID 자격 증명을 관리해야 합니다. Microsoft 문서 기준으로 자동 제출은 이미 게시된 앱에만 쓸 수 있어 최초 제출은 Partner Center에서 직접 합니다. 32비트 Windows에는 설치되지 않고, ARM64 PC에서는 Windows 11의 x64 에뮬레이션에 의존합니다. 기호가 없어 Partner Center의 크래시 분석 정보가 제한됩니다.
+      - **하네스에 미치는 영향**: 자격 증명과 패키지 식별 정보를 워크플로나 저장소에 하드코딩하지 마세요. GitHub Secrets만 씁니다. `Package.appxmanifest`의 `Soriseom.Dev`는 개발 패키지용이니 바꾸지 마세요. 실제 값은 `tools/store/Build-StorePackage.ps1`이 빌드하는 동안에만 넣습니다.
+
+      docs/ARCHITECTURE.md를 고친다.
+      - "횡단 관심사"의 CI 항목에서 `` `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`으로 MSIX를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다(아직 없음, ADR-007). ``를 다음으로 바꾼다.
+        `` `.github/workflows/store-release.yml`은 `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`의 `.msixupload`를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다. 수동 실행하면 패키지만 아티팩트로 만듭니다(ADR-007). ``
+      - "구현 전에 확인할 것"의 `- [ ] Store 자동 제출 방식(msstore CLI와 Entra ID 앱 연동), 최초 제출을 수동으로 해야 하는지`를 다음으로 바꾼다.
+        `- [x] Store 자동 제출 방식: msstore CLI와 Entra ID 앱을 씁니다. Microsoft 문서 기준으로 이미 게시된 앱에만 쓸 수 있어 최초 제출은 수동으로 합니다(ADR-007). 실제 제출은 아직 시험하지 않았습니다.`
+
+      앱을 실행하지 마라. 이유: ADR-009. 워크플로는 로컬에서 실행할 수 없으므로, 위에 적은 명령과 입력을 그대로 써라.
+    expected_files:
+      - .github/workflows/store-release.yml
+      - docs/ADR.md
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'uvx --from actionlint-py actionlint .github/workflows/store-release.yml'
+      - 'git grep --untracked -q -F -e "microsoft/microsoft-store-apppublisher@v1.4" -- .github/workflows/store-release.yml'
+      - 'git grep --untracked -q -F -e "tools/store/Build-StorePackage.ps1" -- .github/workflows/store-release.yml'
+      - 'git grep -q -F -e "msstore publish" -- docs/ADR.md'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s3-store-screenshots
+    title: capture store screenshots in the smoke script
+    type: feat
+    scope: tools
+    description: |
+      먼저 읽을 파일: docs/ADR.md(ADR-009), CLAUDE.md("명령어"의 스모크 설명), tools/smoke/Smoke.ps1(특히 `Save-Screenshot`, `Save-ElementScreenshot`, `Watch-Popup`, `Start-BackdropFixture`, `Watch-FixtureTracks`, `Test-Media`, `$scenarios`), tools/smoke/BackdropFixture.ps1, tools/smoke/MediaFixture.ps1.
+
+      목표: 스모크 스크립트에 `storeshots` 시나리오를 추가한다. 언어(ko-KR, en-US)마다 작업 영역 전체를 캡처한 PNG 두 장을 `$OutDir`에 저장한다: `store-<culture>-popup.png`, `store-<culture>-settings.png`.
+      Store 요구 사항은 PNG, 1366x768 이상, 언어별 업로드, 추가 로고와 마케팅 문구 없음이다. 개인 화면이 나오지 않도록 캡처 영역을 중립 배경으로 덮는다. 이 시나리오는 Claude가 나중에 직접 실행한다. Codex는 실행하지 마라. 이유: ADR-009.
+
+      ## 1. `tools/smoke/BackdropFixture.ps1`
+      `[switch] $Neutral`을 추가한다. 지정하면 빨강·파랑 대신 `#3B6E8F`에서 `#274B6D`로 가는 대각선 그라디언트 비트맵을 폼 `BackgroundImage`로 쓰고, 표시될 때 `SetWindowPos(handle, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`로 다른 일반 창 위에 올린다.
+      TopMost로 만들지 마라. 이유: 위 주석대로 팝업이 그 아래에 남는다. `-Neutral` 없을 때의 동작은 바꾸지 마라. 이유: media 시나리오의 Acrylic 검사가 이 색에 의존한다.
+
+      ## 2. `tools/smoke/MediaFixture.ps1`
+      선택 매개변수 `[string] $ThumbnailPath`를 추가한다. 값이 있으면 첫 `DisplayUpdater.Update()` 전에 `StorageFile.GetFileFromPathAsync`(파일에 이미 있는 `$asTask` 방식)로 파일을 열어 `$controls.DisplayUpdater.Thumbnail = [Windows.Storage.Streams.RandomAccessStreamReference]::CreateFromFile($file)`로 넣는다. 값이 없으면 동작이 지금과 같아야 한다.
+
+      ## 3. `tools/smoke/Smoke.ps1`
+      - `SmokeNative`에 `SetWindowPos` 선언을 추가한다(`tools/smoke/`는 ADR-008 대상이 아니다).
+      - `Start-BackdropFixture`의 프로세스 시작과 준비 대기 코드를 도우미로 빼서, 작업 영역 전체를 `-Neutral`로 덮는 `Start-StoreBackdrop`과 함께 쓴다.
+      - `Save-WorkAreaScreenshot([string] $Name)`: `SystemParametersInfoW(0x30, ...)`의 작업 영역을 `CopyFromScreen`으로 `$OutDir/$Name.png`에 저장하고, 크기가 1366x768 이상이고 3840x2160 이하인지 `Check`로 판정한다. 이유: `PrintWindow`는 투명 팝업과 뒤 배경을 찍지 못한다.
+      - `Save-StoreScreenshots`를 추가하고 `$scenarios`에 `storeshots = { Save-StoreScreenshots }`를 넣는다. 기본 `$Scenario` 값에는 넣지 마라. 이유: 검사가 아니라 산출물 생성이고 시간이 걸린다. `.PARAMETER Scenario` 설명에 기본 목록에 없다고 적는다.
+
+      `Save-StoreScreenshots` 순서:
+      1. `Test-DoNotDisturbOn`이 참이면 `$script:UnavailableReason`을 넣고 `SKIP` 줄을 쓴 뒤 돌아간다(`Watch-FixtureTracks`와 같은 방식).
+      2. `System.Drawing`으로 512x512 그라디언트 PNG를 `$OutDir/store-album-art.png`에 만든다. 이유: 다른 회사의 앨범아트와 상표를 쓰지 않는다.
+      3. 아래 두 언어를 차례로 처리한다.
+         - ko-KR: 첫 곡 `파도 소리`, 둘째 곡 `섬의 아침`, 아티스트 `소리섬 데모`
+         - en-US: 첫 곡 `Ocean Waves`, 둘째 곡 `Island Morning`, 아티스트 `Soriseom Demo`
+         처리: `Stop-App`, `Invoke-LanguageOverride <culture>`, `Open-Settings`, `Start-StoreBackdrop`, 2초 대기(앱이 미디어 감시를 시작할 시간, `Watch-FixtureTracks` 주석 참고), `MediaFixture.ps1`을 `$FixtureAppId`, 위 값, `-ThumbnailPath`로 시작한다(`-StatusPath`는 `$OutDir` 안의 임시 파일, 이 파일은 읽지 않고 끝에 지운다).
+         `TitleText`가 정확히 첫 곡 제목인 팝업을 12초까지 기다린다. 못 찾으면 `Check` 실패로 처리하고 그 언어의 나머지를 건너뛴다. 찾으면 열림 애니메이션이 끝나도록 1.5초 기다렸다가 `Save-WorkAreaScreenshot "store-<culture>-popup"`을 호출한다.
+         이어서 fixture를 멈추고 `Wait-For { -not (Get-PopupWindow) }`로 팝업이 사라지길 기다린다. `Wait-For`로 `Get-SettingsElement $FixtureAppId` 행을 찾아 `ScrollItemPattern`으로 보이게 한 뒤, 설정 창을 `SetWindowPos`로 `HWND_TOPMOST`, 작업 영역 가운데, 폭 720 DIP, 높이는 1040 DIP와 작업 영역 높이 - 80 DIP 중 작은 값으로 옮긴다(`GetDpiForSystem` 배율 적용). 500ms 뒤 `Save-WorkAreaScreenshot "store-<culture>-settings"`를 호출한다.
+         `finally`에서 fixture와 backdrop 프로세스를 멈춘다. 설정 창이 없을 때 null을 다루지 않고 넘어가지 마라: `Wait-For`로 얻은 값이 없으면 `Check` 실패로 처리한다. 이유: 예외로 빠지면 다음 언어를 찍지 못한다.
+      4. 끝나면 `store-album-art.png`를 지운다.
+
+      언어와 설정 복원은 스크립트의 기존 `Restore-UserState`가 맡으므로 새로 만들지 마라.
+      실제 곡 제목을 출력이나 로그에 남기지 마라. 데모 제목과 같을 때만 캡처한다. 이유: ADR-009.
+
+      ## 4. 문서
+      - CLAUDE.md "그 밖의 명령" 표의 `앱 실행 확인(Claude만)` 줄 아래에 추가한다.
+        | Store 스크린샷 생성(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots -OutDir <폴더>` |
+      - docs/ADR.md ADR-009 "하네스에 미치는 영향" 끝에 추가한다.
+        `` `storeshots` 시나리오는 작업 영역 전체를 찍으므로, 결과를 쓰기 전에 다른 창이나 개인 정보가 찍히지 않았는지 이미지를 직접 확인하세요. ``
+
+      금지: 기존 시나리오의 판정, 곡 이름, 기본값을 바꾸지 마라. 이유: 지금 통과하는 검사가 깨진다. 스크린샷을 저장소에 커밋하지 마라. 이유: Partner Center에만 올리고 언제든 다시 만들 수 있다. 앱 코드(`src/`)를 고치지 마라. 앱과 `tools/smoke/`를 실행하지 마라. 이유: ADR-009.
+    expected_files:
+      - tools/smoke/Smoke.ps1
+      - tools/smoke/BackdropFixture.ps1
+      - tools/smoke/MediaFixture.ps1
+      - CLAUDE.md
+      - docs/ADR.md
+    ac:
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/Smoke.ps1"'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/BackdropFixture.ps1"'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/MediaFixture.ps1"'
+      - 'git grep -q -F -e "storeshots = { Save-StoreScreenshots }" -- tools/smoke/Smoke.ps1'
+      - 'git grep -q -F -e "ThumbnailPath" -- tools/smoke/MediaFixture.ps1'
+      - 'git grep -q -F -e "Neutral" -- tools/smoke/BackdropFixture.ps1'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s4-submission-docs
+    title: add the first submission guide
+    type: docs
+    description: |
+      먼저 읽을 파일: docs/store-listing.md, docs/PRD.md("핵심 기능", "출시 준비"), docs/ADR.md(ADR-007, ADR-009, ADR-010), .github/workflows/store-release.yml, CLAUDE.md("언어").
+
+      목표: 사람이 Partner Center에서 최초 제출을 끝내는 데 필요한 순서와 입력값을 `docs/store-listing.md`에 넣고, `docs/PRD.md`의 출시 준비 목록을 현재 상태로 고친다. 앱 코드와 등록 문구(ko-KR, en-US 절의 기존 코드 블록)는 바꾸지 마라.
+
+      ## 1. `docs/store-listing.md`
+      "제출 전 확인" 목록을 고친다.
+      - `PRIVACY.md` 항목을 `- [x]`로 바꾼다. 이유: 2026-11-05에 `main`에 있고 URL이 200을 돌려주는 것을 확인했다.
+      - 맨 끝에 추가한다: `- [ ] 업로드할 패키지로 Windows App Certification Kit을 돌립니다. 이 PC의 빌드와 Store 인증 결과가 다를 수 있습니다.`
+
+      "공통 입력값" 절 바로 앞에 아래 절을 추가한다. 번호와 내용을 그대로 쓴다.
+
+      ## 최초 제출 순서
+
+      1. Partner Center의 앱 ID 페이지에서 Package/Identity/Name, Package/Identity/Publisher, Package/Properties/PublisherDisplayName 값을 확인해 GitHub Secrets에 넣습니다.
+         `gh secret set PACKAGE_IDENTITY_NAME`, `gh secret set PACKAGE_PUBLISHER`, `gh secret set PACKAGE_PUBLISHER_DISPLAY_NAME`
+      2. 패키지를 만듭니다. `gh workflow run store-release.yml -f version=1.0.0`
+      3. 실행이 끝나면 패키지를 내려받습니다. `gh run download <실행 ID> -n store-package`
+      4. Partner Center의 Packages 페이지에 `.msixupload`를 올립니다. 기기군 선택이 나오면 Windows 10/11 Desktop만 남깁니다.
+      5. Store listings, Properties, Age ratings, Submission options를 이 문서대로 채우고 언어별 스크린샷을 올립니다.
+      6. 제출합니다. 인증을 통과해 게시되기 전까지는 태그를 push하지 않습니다. 자동 제출은 이미 게시된 앱에만 쓸 수 있어 제출 단계에서 실패합니다.
+      7. 게시된 뒤부터는 최초 제출보다 높은 버전으로 `git tag vX.Y.Z`, `git push origin vX.Y.Z`를 실행합니다(ADR-007). 첫 태그 제출이 Secrets 인증을 처음 시험하는 때이므로 결과를 확인합니다.
+
+      "공통 입력값" 절과 "## ko-KR" 사이에 아래 세 절을 추가한다.
+
+      ## Submission options
+
+      `runFullTrust` 사유(Why do you need the runFullTrust capability?):
+
+      ```text
+      Soriseom is a WinUI 3 desktop app built with the Windows App SDK. Packaged desktop apps run as full-trust processes, and this app model requires the capability. The app runs in the system tray after its settings window closes, starts at sign-in unless the user turns that off in its settings, and shows a click-through popup that does not take focus. It does not use the network or collect data.
+      ```
+
+      Notes for certification:
+
+      ```text
+      No account or sign-in is required. The app shows a popup only when the track in the current Windows media session changes, so a track that is already playing when the app starts shows no popup.
+      To test: 1. Start the app. Its settings window opens on the first launch, and the app stays in the system tray after you close it. 2. Play music in an app that shares track information with Windows media sessions, such as Media Player or a music website in Microsoft Edge. 3. Skip to another track. The popup shows the title, artist, and album art for about 4 seconds at the top center of the primary display. It stays hidden while a fullscreen app is in use or Do Not Disturb is on.
+      The app starts at sign-in by default, and this can be turned off in its settings. It does not play audio or use the network.
+      ```
+
+      ## 연령 등급 설문
+
+      IARC 설문은 첫 질문에서 고른 앱 분류에 따라 문항이 달라지고 바뀔 수 있으므로, 화면의 문항을 보고 사람이 아래 사실에 맞게 답합니다. 첫 질문에서는 게임이 아닌 앱 분류 중 유틸리티에 가장 가까운 항목을 고릅니다.
+
+      | 항목 | 사실 |
+      |---|---|
+      | 앱이 직접 제공하는 콘텐츠 | 폭력, 성적 내용, 욕설, 약물, 도박이 없습니다. |
+      | 표시하는 외부 콘텐츠 | 사용자가 재생 중인 곡의 제목, 아티스트, 앨범아트를 받은 그대로 잠깐 표시합니다. 앱이 곡을 제공하거나 고르지 않습니다. |
+      | 사용자 간 상호작용 | 없습니다. 채팅, 공유, 사용자 생성 콘텐츠 업로드 기능이 없습니다. |
+      | 위치와 개인정보 공유 | 없습니다. 네트워크를 쓰지 않고 곡 정보를 PC 밖으로 보내지 않습니다. |
+      | 구매와 광고 | 없습니다. 무료이고 앱 내 구매와 광고가 없습니다. |
+      | 웹 접근 | 없습니다. 앱 안에 브라우저나 외부 링크 탐색 기능이 없습니다. |
+
+      ## 스크린샷
+
+      언어마다 PNG 두 장을 올립니다. Claude가 `tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots`로 만들고, 다른 창이나 개인 정보가 없는지 확인합니다(ADR-009). 파일과 캡션은 다음과 같습니다.
+
+      | 파일 | ko-KR 캡션 | en-US 캡션 |
+      |---|---|---|
+      | `store-<언어>-popup.png` | 곡이 바뀌면 제목, 아티스트, 앨범아트를 잠깐 표시합니다. | Briefly shows the title, artist, and album art when the track changes. |
+      | `store-<언어>-settings.png` | 표시 시간, 위치, 크기와 앱별 표시 여부를 설정합니다. | Choose the display time, position, size, and which apps can show popups. |
+
+      ## 2. `docs/PRD.md` "출시 준비"
+      "사용자" 목록을 다음으로 바꾼다.
+      - [x] Partner Center에서 앱 이름 'Soriseom'과 '소리섬' 예약
+      - [ ] 패키지 식별 정보 3개를 GitHub Secrets에 등록([최초 제출 순서](store-listing.md#최초-제출-순서))
+      - [ ] Store 최초 제출을 Partner Center에서 직접 진행
+      - [ ] 자동 제출용 Entra ID 앱을 만들고 자격 증명을 GitHub Secrets에 등록(Secrets 5개는 등록돼 있고, 첫 태그 제출 때 실제 인증을 확인)
+      - [ ] Store 스크린샷 업로드
+
+      "Claude" 목록을 다음으로 바꾼다.
+      - [x] GitHub 공개 저장소 `LOONACIA/Soriseom` 생성
+      - [x] 앱 아이콘 초안: 섬과 음표 모티브의 SVG, Store 로고 크기별 PNG, 트레이용 라이트/다크
+      - [x] Store 등록 문구 한국어/영어 초안과 개인정보 처리방침(데이터 수집 없음)
+      - [x] 태그 제출 워크플로와 Store 업로드 패키지 스크립트
+      - [ ] Store 스크린샷 생성(`storeshots` 시나리오)
+
+      금지:
+      - 실제 Name, Publisher, 제품 ID, 판매자 ID 값을 문서에 적지 마라. 이유: ADR-007.
+      - 설문 문항 원문을 지어내지 마라. 이유: 문항은 Partner Center에서만 볼 수 있고 바뀔 수 있다. 위 표의 사실만 쓴다.
+      - 코드와 스크립트를 고치지 마라. 이유: 이 스텝은 문서만 바꾼다.
+    expected_files:
+      - docs/store-listing.md
+      - docs/PRD.md
+    ac:
+      - 'git grep -q -F -e "gh workflow run store-release.yml" -- docs/store-listing.md'
+      - 'git grep -q -F -e "PACKAGE_PUBLISHER_DISPLAY_NAME" -- docs/store-listing.md'
+      - 'git grep -q -F -e "Why do you need the runFullTrust capability?" -- docs/store-listing.md'
+      - 'git grep -q -F -e "Notes for certification" -- docs/store-listing.md'
+      - 'git grep -q -F -e "IARC" -- docs/store-listing.md'
+      - 'git grep -q -F -e "store-<" -- docs/store-listing.md'
+      - 'git grep -q -F -e "- [x] GitHub" -- docs/PRD.md'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
