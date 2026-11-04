@@ -13,6 +13,10 @@ public class AppSettingsTests
         Assert.Equal(10, AppSettings.MaxDisplaySeconds);
         Assert.Equal(4, AppSettings.DefaultDisplaySeconds);
         Assert.Equal(4, settings.DisplaySeconds);
+        Assert.Equal(70, AppSettings.MinPopupSizePercent);
+        Assert.Equal(100, AppSettings.MaxPopupSizePercent);
+        Assert.Equal(90, AppSettings.DefaultPopupSizePercent);
+        Assert.Equal(90, settings.PopupSizePercent);
         Assert.Equal(PopupPosition.TopCenter, settings.Position);
         Assert.True(settings.HideWhenFullscreen);
         Assert.Equal(AppLanguage.System, settings.Language);
@@ -52,6 +56,41 @@ public class AppSettingsTests
 
         Assert.Equal(expected, updated.DisplaySeconds);
         Assert.Equal(4, original.DisplaySeconds);
+    }
+
+    [Theory]
+    [InlineData(int.MinValue, 70)]
+    [InlineData(0, 70)]
+    [InlineData(69, 70)]
+    [InlineData(70, 70)]
+    [InlineData(80, 80)]
+    [InlineData(100, 100)]
+    [InlineData(101, 100)]
+    [InlineData(int.MaxValue, 100)]
+    public void PopupSizePercentClampsOnInitialization(int value, int expected)
+    {
+        var settings = new AppSettings { PopupSizePercent = value };
+
+        Assert.Equal(expected, settings.PopupSizePercent);
+    }
+
+    [Theory]
+    [InlineData(int.MinValue, 70)]
+    [InlineData(0, 70)]
+    [InlineData(69, 70)]
+    [InlineData(70, 70)]
+    [InlineData(80, 80)]
+    [InlineData(100, 100)]
+    [InlineData(101, 100)]
+    [InlineData(int.MaxValue, 100)]
+    public void PopupSizePercentClampsOnCopy(int value, int expected)
+    {
+        var original = new AppSettings();
+
+        var updated = original with { PopupSizePercent = value };
+
+        Assert.Equal(expected, updated.PopupSizePercent);
+        Assert.Equal(90, original.PopupSizePercent);
     }
 
     [Fact]

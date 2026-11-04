@@ -18,6 +18,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _languageAtLaunch = store.Current.Language;
         DisplaySeconds = store.Current.DisplaySeconds;
         PositionIndex = (int)store.Current.Position;
+        PopupSizePercent = store.Current.PopupSizePercent;
         HideWhenFullscreen = store.Current.HideWhenFullscreen;
         LanguageIndex = (int)store.Current.Language;
         foreach (var (appId, displayName, enabled) in store.Current.Apps
@@ -36,11 +37,18 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public int MaxDisplaySeconds => AppSettings.MaxDisplaySeconds;
 
+    public int MinPopupSizePercent => AppSettings.MinPopupSizePercent;
+
+    public int MaxPopupSizePercent => AppSettings.MaxPopupSizePercent;
+
     [ObservableProperty]
     public partial double DisplaySeconds { get; set; }
 
     [ObservableProperty]
     public partial int PositionIndex { get; set; }
+
+    [ObservableProperty]
+    public partial double PopupSizePercent { get; set; }
 
     [ObservableProperty]
     public partial bool HideWhenFullscreen { get; set; }
@@ -77,6 +85,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             _store.Update(_store.Current with { Position = position });
         }
+    }
+
+    partial void OnPopupSizePercentChanged(double value)
+    {
+        _store.Update(_store.Current with { PopupSizePercent = (int)Math.Round(value) });
     }
 
     partial void OnHideWhenFullscreenChanged(bool value)

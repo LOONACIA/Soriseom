@@ -73,6 +73,9 @@
   <data name="DisplaySecondsSlider.Header" xml:space="preserve">
     <value>Display time (seconds)</value>
   </data>
+  <data name="PopupSizeSlider.Header" xml:space="preserve">
+    <value>Popup size (%)</value>
+  </data>
   <data name="PositionComboBox.Header" xml:space="preserve">
     <value>Position</value>
   </data>

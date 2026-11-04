@@ -49,6 +49,18 @@
                 </ComboBox>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
+                <Slider
+                    x:Uid="PopupSizeSlider"
+                    AutomationProperties.AutomationId="PopupSizeSlider"
+                    Minimum="{x:Bind ViewModel.MinPopupSizePercent}"
+                    Maximum="{x:Bind ViewModel.MaxPopupSizePercent}"
+                    StepFrequency="5"
+                    TickFrequency="5"
+                    TickPlacement="Outside"
+                    SnapsTo="StepValues"
+                    Value="{x:Bind ViewModel.PopupSizePercent, Mode=TwoWay}" />
+            </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
                 <ToggleSwitch
                     x:Uid="HideWhenFullscreenToggle"
                     IsOn="{x:Bind ViewModel.HideWhenFullscreen, Mode=TwoWay}" />

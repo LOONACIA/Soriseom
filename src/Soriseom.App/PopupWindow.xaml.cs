@@ -23,6 +23,8 @@ public sealed partial class PopupWindow : Window
     private const int WidthDip = 360;
     private const int HeightDip = 80;
     private const int MarginDip = 16;
+    private const double BodyFontSizeDip = 14;
+    private const double MinVisibleFontSizeDip = 12;
     private const float CollapsedLeftDip = (WidthDip - HeightDip) / 2f;
     private const float CollapsedRightDip = (WidthDip + HeightDip) / 2f;
     private const float HiddenScale = 0.4f;
@@ -79,20 +81,28 @@ public sealed partial class PopupWindow : Window
         SystemBackdrop = new TransparentBackdrop();
     }
 
-    public void ShowTrack(MediaSnapshot track, IRandomAccessStreamReference? thumbnail, PopupPosition position)
+    public void ShowTrack(MediaSnapshot track, IRandomAccessStreamReference? thumbnail, PopupPosition position, int sizePercent)
     {
         TitleText.Text = track.Title;
         ArtistText.Text = track.Artist;
+
+        // The Viewbox shrinks text along with the popup, so its layout size grows to stay readable on screen.
+        double fontSize = Math.Max(BodyFontSizeDip, MinVisibleFontSizeDip * 100 / sizePercent);
+        TitleText.FontSize = fontSize;
+        ArtistText.FontSize = fontSize;
         ShowNoteArt();
 
         var display = DisplayArea.Primary;
         var workArea = display.WorkArea;
         var monitor = Win32Interop.GetMonitorFromDisplayId(display.DisplayId);
         var result = PInvoke.GetDpiForMonitor(new HMONITOR(monitor), MONITOR_DPI_TYPE.MDT_EFFECTIVE_DPI, out uint dpiX, out _);
-        double scale = result.Failed ? 1.0 : dpiX / 96.0;
-        int width = (int)Math.Round(WidthDip * scale);
-        int height = (int)Math.Round(HeightDip * scale);
-        int margin = (int)Math.Round(MarginDip * scale);
+        double dpiScale = result.Failed ? 1.0 : dpiX / 96.0;
+        double sizeScale = dpiScale * sizePercent / 100.0;
+
+        // The Viewbox in the XAML fits the 360x80 layout to this size, so the animations stay in layout units.
+        int width = (int)Math.Round(WidthDip * sizeScale);
+        int height = (int)Math.Round(HeightDip * sizeScale);
+        int margin = (int)Math.Round(MarginDip * dpiScale);
         var bounds = PopupPlacement.Compute(position, new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height), width, height, margin);
 
         if (!_isVisible)

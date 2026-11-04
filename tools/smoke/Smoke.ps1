@@ -14,7 +14,7 @@
     (locked, full-screen, or other media playback holds the current session), which says nothing about the code.
 
 .PARAMETER Scenario
-    Comma-separated subset of: launch, relaunch, startup, language, media, tray.
+    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, tray.
 
 .PARAMETER AfterSignIn
     Read-only check to run after a real sign-in: no build, no deploy, no launch.
@@ -26,7 +26,7 @@
     pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Scenario language,media
 #>
 param(
-    [string] $Scenario = 'launch,relaunch,startup,language,media,tray',
+    [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,tray',
     [switch] $AfterSignIn,
     [string] $OutDir
 )
@@ -87,6 +87,7 @@ $InvokePattern = [System.Windows.Automation.InvokePattern]::Pattern
 $ExpandPattern = [System.Windows.Automation.ExpandCollapsePattern]::Pattern
 $SelectionPattern = [System.Windows.Automation.SelectionPattern]::Pattern
 $SelectionItemPattern = [System.Windows.Automation.SelectionItemPattern]::Pattern
+$RangeValuePattern = [System.Windows.Automation.RangeValuePattern]::Pattern
 
 $script:FailedChecks = 0
 $script:UnavailableReason = $null
@@ -463,9 +464,8 @@ function Watch-Popup([string] $Title, [string] $ScreenshotName) {
     return $seen
 }
 
-function Test-Media {
-    $expectedName = (New-Object -ComObject Shell.Application).NameSpace('shell:AppsFolder').ParseName($FixtureAppId).Name
-    Open-Settings
+# Returns what the popup of each fixture track did, or nothing when this desktop cannot judge them.
+function Watch-FixtureTracks([string] $ScreenshotName) {
     # The app starts watching media just after it shows the window, and by design a track that is
     # already playing at that point gets no popup.
     Start-Sleep -Seconds 2
@@ -478,7 +478,7 @@ function Test-Media {
         '-AppId', $FixtureAppId, '-FirstTitle', $FirstTrack, '-SecondTitle', $SecondTrack,
         '-Artist', $FixtureArtist, '-StatusPath', "`"$statusPath`"")
     try {
-        $first = Watch-Popup $FirstTrack 'popup'
+        $first = Watch-Popup $FirstTrack $ScreenshotName
         $second = Watch-Popup $SecondTrack
         [void]$fixture.WaitForExit(15000)
     } finally {
@@ -488,28 +488,49 @@ function Test-Media {
     if (-not (Test-Path $statusPath)) { throw 'the media fixture wrote no status' }
     $status = Get-Content $statusPath -Raw | ConvertFrom-StringData
     Remove-Item $statusPath -Force
+    $reason = $null
     if ($status[$FirstTrack] -ne 'True' -or $status[$SecondTrack] -ne 'True') {
-        $script:UnavailableReason = 'other media playback took over as the current session, so the media checks say nothing; stop it and run again'
+        $reason = 'other media playback took over as the current session, so the media checks say nothing; stop it and run again'
     } elseif ($first.FullScreen -or $second.FullScreen) {
-        $script:UnavailableReason = 'an app went full-screen during the media checks, and the app hides popups then by design; run again without it'
+        $reason = 'an app went full-screen during the media checks, and the app hides popups then by design; run again without it'
     }
 
-    if ($script:UnavailableReason) {
-        Write-Line "SKIP media: $($script:UnavailableReason)"
+    if ($reason) {
+        $script:UnavailableReason = $reason
+        Write-Line "SKIP media: $reason"
         return
     }
 
+    return @{ First = $first; Second = $second }
+}
+
+# The margin to the work area does not change with the popup size.
+function Test-PopupBounds($Bounds, [int] $SizePercent) {
+    $workArea = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+    $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+    $margin = 16 * $dpiScale
+    $centerX = ($workArea.Left + $workArea.Right) / 2
+    $edges = "left $($Bounds.Left), top $($Bounds.Top), right $($Bounds.Right), bottom $($Bounds.Bottom)"
+    Check "the $SizePercent% popup settles at the top center of the work area" ([Math]::Abs(($Bounds.Left + $Bounds.Right) / 2 - $centerX) -le 2 -and [Math]::Abs($Bounds.Top - $workArea.Top - $margin) -le 2) $edges
+
+    $sizeScale = $dpiScale * $SizePercent / 100
+    Check "the $SizePercent% popup is that share of 360x80 DIP" ([Math]::Abs($Bounds.Right - $Bounds.Left - 360 * $sizeScale) -le 2 -and [Math]::Abs($Bounds.Bottom - $Bounds.Top - 80 * $sizeScale) -le 2) $edges
+}
+
+function Test-Media {
+    $expectedName = (New-Object -ComObject Shell.Application).NameSpace('shell:AppsFolder').ParseName($FixtureAppId).Name
+    Open-Settings
+    $tracks = Watch-FixtureTracks 'popup'
+    if (-not $tracks) { return }
+
+    $first = $tracks.First
+    $second = $tracks.Second
     Check 'a track change shows the popup' $first.Shown
     if ($first.Shown) {
         Check 'the popup disappears after the default 4 seconds' ($first.Duration -ge 3.5 -and $first.Duration -le 5.5) "visible for $($first.Duration) s"
         Check 'the popup does not take focus' (-not $first.StolenFocus)
-
-        $workArea = [SmokeNative+RECT]::new()
-        [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
-        $margin = 16 * [SmokeNative]::GetDpiForSystem() / 96
-        $centerX = ($workArea.Left + $workArea.Right) / 2
-        $bounds = $first.Bounds
-        Check 'the popup settles at the top center of the work area' ([Math]::Abs(($bounds.Left + $bounds.Right) / 2 - $centerX) -le 2 -and [Math]::Abs($bounds.Top - $workArea.Top - $margin) -le 2) "left $($bounds.Left), top $($bounds.Top), right $($bounds.Right)"
+        Test-PopupBounds $first.Bounds 90
 
         # WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE
         $requiredStyles = 0x8 -bor 0x20 -bor 0x80 -bor 0x08000000
@@ -525,6 +546,21 @@ function Test-Media {
         Start-Sleep -Milliseconds 300
         Save-Screenshot (Get-SettingsWindow) 'app-list'
     }
+}
+
+function Test-PopupSize {
+    Open-Settings
+    (Get-SettingsElement 'PopupSizeSlider').GetCurrentPattern($RangeValuePattern).SetValue(70)
+    $tracks = Watch-FixtureTracks 'popup-small'
+    if (-not $tracks) { return }
+
+    Check 'a track change shows the popup at the chosen size' $tracks.First.Shown
+    if ($tracks.First.Shown) { Test-PopupBounds $tracks.First.Bounds 70 }
+
+    Restart-App
+    $slider = (Get-SettingsElement 'PopupSizeSlider').GetCurrentPattern($RangeValuePattern)
+    Check 'the chosen popup size survives a restart' ($slider.Current.Value -eq 70) "slider is at $($slider.Current.Value)"
+    $slider.SetValue(90)
 }
 
 function Get-TaskbarPart([string] $ClassName) {
@@ -613,6 +649,7 @@ $scenarios = [ordered]@{
     startup = { Test-Startup }
     language = { Test-Language }
     media = { Test-Media }
+    popupsize = { Test-PopupSize }
     tray = { Test-Tray }
 }
 $selected = $Scenario -split ','

@@ -81,7 +81,7 @@ internal sealed class PopupController
             _displayedTrack = track;
             _displayedThumbnail = _adapter.CurrentThumbnail;
             _isShowing = true;
-            _window.ShowTrack(track, _displayedThumbnail, settings.Position);
+            _window.ShowTrack(track, _displayedThumbnail, settings.Position, settings.PopupSizePercent);
             _hideTimer.Stop();
             _hideTimer.Interval = TimeSpan.FromSeconds(settings.DisplaySeconds);
             _hideTimer.Start();

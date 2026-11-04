@@ -73,6 +73,9 @@
   <data name="DisplaySecondsSlider.Header" xml:space="preserve">
     <value>표시 시간(초)</value>
   </data>
+  <data name="PopupSizeSlider.Header" xml:space="preserve">
+    <value>팝업 크기(%)</value>
+  </data>
   <data name="PositionComboBox.Header" xml:space="preserve">
     <value>위치</value>
   </data>
