@@ -1,0 +1,66 @@
+id: popup-status-probe
+goal: >
+  스모크의 media 시나리오에서 앱이 테스트 곡을 `playing=False`로 읽은 뒤 재생 이벤트를 받지 못해 팝업이 뜨지 않은 사례가 있다.
+  그때 재생 상태가 오래된 값이었는지 실제로 재생 중이 아니었는지 가를 기록을 Debug 빌드에 더한다. 완료는 빌드, 테스트, 포맷 검사가
+  통과하고 앱의 동작이 바뀌지 않은 상태다. 원인 수정은 이 계획에 넣지 않는다. 증거가 나온 뒤 별도 계획으로 다룬다.
+approved: true
+steps:
+  - id: s1-status-probe
+    title: trace the raw playback status and a re-read at the settle tick
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md, docs/ADR.md(ADR-009의 "하네스에 미치는 영향"), `src/Soriseom.App/PopupTrace.cs`, `src/Soriseom.App/MediaSessionAdapter.cs`, `src/Soriseom.App/PopupController.cs`, `src/Soriseom.Core/PopupDecider.cs`.
+
+      배경: 추적 로그에서 테스트 곡의 첫 읽기가 제목은 있는데 `playing=False`였고, 그 뒤 `event playback`이 오지 않았다. `PopupDecider`는 재생 중이 아니면 재평가를 예약하지 않으므로 팝업이 뜨지 않았다. 테스트 곡 스크립트는 재생 상태를 제목보다 먼저 설정하므로 세션 객체가 오래된 값을 돌려줬다고 의심하지만, 지금 기록은 참/거짓만 남기고 다시 읽지 않아 확인할 수 없다.
+
+      이 스텝은 기록만 추가한다. 앱의 동작을 바꾸지 마라. 이유: 원인을 확정하기 전에 동작을 고치면 증거가 사라진다. `Current`, `CurrentThumbnail`, `Changed` 발생 시점과 값을 바꾸지 마라. `src/Soriseom.Core`, 테스트, `tools/smoke/`, 문서도 건드리지 마라. 기존 `PopupTrace.Write`의 다른 필드와 `Debug.WriteLine` 호출은 그대로 둔다.
+
+      제목, 아티스트, 앱 ID 원문과 예외 메시지를 메시지에 넣지 마라. 이유: 스모크가 이 출력을 파일에 저장하는데, ADR-009는 사용자의 데이터를 로그에 남기지 못하게 한다. 재생 상태 값은 열거형 이름이라 그대로 남겨도 된다.
+
+      ## 1. `src/Soriseom.App/MediaSessionAdapter.cs`
+      - `RefreshMediaPropertiesAsync`와 `RefreshPlaybackInfo`: `isPlaying`을 구하는 줄을 아래 두 줄로 바꾼다. `GetPlaybackInfo()` 호출은 각각 한 번이어야 한다. 이유: 두 번 읽으면 기록한 값과 판단에 쓴 값이 달라질 수 있다.
+      ```csharp
+      var status = session.GetPlaybackInfo().PlaybackStatus;
+      bool isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+      ```
+      - 같은 두 메서드의 기록: `read end` 줄의 `playing={isPlaying}` 뒤에 ` status={status}`를 더하고, `playback` 줄을 `PopupTrace.Write($"playback playing={isPlaying} status={status}");`로 바꾼다.
+      - `StartAsync` 바로 다음에 public 메서드를, 파일의 맨 끝 private 메서드로 `TraceStatusAsync`를 넣는다. 본문은 아래 그대로 쓴다. `[Conditional]` 메서드는 `void`만 될 수 있어 둘로 나눈다.
+      ```csharp
+      // Debug builds only. Tells a stale value on the session object from a state Windows really reports.
+      [Conditional("DEBUG")]
+      public void TraceStatus() => _ = TraceStatusAsync();
+      ```
+      ```csharp
+      private async Task TraceStatusAsync()
+      {
+          try
+          {
+              PopupTrace.Write($"status snapshot={Current?.IsPlaying} held={_session?.GetPlaybackInfo().PlaybackStatus} sameManager={_manager?.GetCurrentSession()?.GetPlaybackInfo().PlaybackStatus}");
+              if (Current is { IsPlaying: false })
+              {
+                  var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                  var session = manager.GetCurrentSession();
+                  PopupTrace.Write($"status newManager={session?.GetPlaybackInfo().PlaybackStatus} sameApp={session?.SourceAppUserModelId == _session?.SourceAppUserModelId}");
+              }
+          }
+          catch (Exception exception)
+          {
+              PopupTrace.Failure("status", exception);
+          }
+      }
+      ```
+      새 매니저는 재생 중이 아닐 때만 만든다. 이유: 정상 경로의 시점을 흔들지 않기 위해서다. 새 매니저에 이벤트를 구독하지 마라. `_manager`, `_session` 필드에 넣지도 마라. 이유: 비교용으로 한 번 읽고 버리는 값이다.
+
+      ## 2. `src/Soriseom.App/PopupController.cs`
+      `_reevaluateTimer.Tick` 처리기에서 `PopupTrace.Write("reevaluate tick");`와 `Evaluate();` 사이에 `_adapter.TraceStatus();`를 넣는다. 이 호출은 Release에서 빠진다.
+
+      앱을 실행하지 마라(`dotnet run`, exe 실행, 패키지 등록, `tools/smoke/` 포함). 이유: ADR-009. 빌드와 포맷 검사로만 확인한다.
+    expected_files:
+      - src/Soriseom.App/MediaSessionAdapter.cs
+      - src/Soriseom.App/PopupController.cs
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
