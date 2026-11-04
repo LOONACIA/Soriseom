@@ -43,6 +43,10 @@ internal sealed class MediaSessionAdapter
         }
     }
 
+    // Debug builds only. Tells a stale value on the session object from a state Windows really reports.
+    [Conditional("DEBUG")]
+    public void TraceStatus() => _ = TraceStatusAsync();
+
     private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args)
     {
         bool queued = _dispatcherQueue.TryEnqueue(async () => await AttachCurrentSessionAsync());
@@ -112,10 +116,11 @@ internal sealed class MediaSessionAdapter
                 return;
             }
 
-            bool isPlaying = session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            var status = session.GetPlaybackInfo().PlaybackStatus;
+            bool isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             Current = new MediaSnapshot(session.SourceAppUserModelId, properties.Title ?? string.Empty, properties.Artist ?? string.Empty, isPlaying);
             CurrentThumbnail = properties.Thumbnail;
-            PopupTrace.Write($"read end version={version} app={PopupTrace.Mask(session.SourceAppUserModelId)} title={PopupTrace.Mask(properties.Title)} artist={PopupTrace.Mask(properties.Artist)} playing={isPlaying} thumbnail={properties.Thumbnail is not null}");
+            PopupTrace.Write($"read end version={version} app={PopupTrace.Mask(session.SourceAppUserModelId)} title={PopupTrace.Mask(properties.Title)} artist={PopupTrace.Mask(properties.Artist)} playing={isPlaying} status={status} thumbnail={properties.Thumbnail is not null}");
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
@@ -135,15 +140,34 @@ internal sealed class MediaSessionAdapter
 
         try
         {
-            bool isPlaying = session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            var status = session.GetPlaybackInfo().PlaybackStatus;
+            bool isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             Current = new MediaSnapshot(session.SourceAppUserModelId, track.Title, track.Artist, isPlaying);
-            PopupTrace.Write($"playback playing={isPlaying}");
+            PopupTrace.Write($"playback playing={isPlaying} status={status}");
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
         {
             PopupTrace.Failure("playback", exception);
             Debug.WriteLine(exception);
+        }
+    }
+
+    private async Task TraceStatusAsync()
+    {
+        try
+        {
+            PopupTrace.Write($"status snapshot={Current?.IsPlaying} held={_session?.GetPlaybackInfo().PlaybackStatus} sameManager={_manager?.GetCurrentSession()?.GetPlaybackInfo().PlaybackStatus}");
+            if (Current is { IsPlaying: false })
+            {
+                var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                var session = manager.GetCurrentSession();
+                PopupTrace.Write($"status newManager={session?.GetPlaybackInfo().PlaybackStatus} sameApp={session?.SourceAppUserModelId == _session?.SourceAppUserModelId}");
+            }
+        }
+        catch (Exception exception)
+        {
+            PopupTrace.Failure("status", exception);
         }
     }
 }

@@ -32,6 +32,7 @@ internal sealed class PopupController
         _reevaluateTimer.Tick += (_, _) =>
         {
             PopupTrace.Write("reevaluate tick");
+            _adapter.TraceStatus();
             Evaluate();
         };
         _hideTimer = dispatcherQueue.CreateTimer();
