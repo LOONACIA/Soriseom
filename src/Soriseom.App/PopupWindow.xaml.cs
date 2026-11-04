@@ -58,7 +58,9 @@ public sealed partial class PopupWindow : Window
             Debug.WriteLine(args.ErrorMessage);
             ShowNoteArt();
         };
-        var presenter = OverlappedPresenter.Create();
+
+        // Create() keeps WS_DLGFRAME even without a border, which takes 3 pixels off each side of the client area.
+        var presenter = OverlappedPresenter.CreateForContextMenu();
         presenter.SetBorderAndTitleBar(false, false);
         presenter.IsResizable = false;
         presenter.IsMaximizable = false;
