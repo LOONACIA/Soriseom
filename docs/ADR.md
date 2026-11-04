@@ -38,7 +38,7 @@
 - **상태**: 채택
 - **결정**: MSIX 패키지 앱으로 만들고 Microsoft Store로만 배포합니다. unpackaged 실행은 지원하지 않습니다.
 - **이유**: Store가 코드 서명, 업데이트, Windows App SDK 런타임 설치를 대신 처리합니다.
-- **트레이드오프**: GitHub Releases, winget, 설치 프로그램으로는 배포하지 않습니다. 패키지 ID가 Partner Center에 묶입니다. 개발 중에는 임시 패키지 ID를 쓰다가 이름을 예약한 뒤 Partner Center의 값으로 바꿉니다.
+- **트레이드오프**: GitHub Releases, winget, 설치 프로그램으로는 배포하지 않습니다. 패키지 ID가 Partner Center에 묶입니다. 저장소의 매니페스트는 임시 패키지 ID를 유지하고, Store 패키지를 만들 때만 Partner Center의 값을 넣습니다(ADR-007).
 - **하네스에 미치는 영향**: 패키지 ID가 필요한 API(`ApplicationData`, `StartupTask`)는 써도 됩니다. 설치 프로그램(Inno Setup 등), 자체 업데이트 코드, unpackaged용 분기 코드를 추가하지 마세요.
 
 ### ADR-004: Core와 App 분리, Core는 순수 .NET이고 Core만 테스트한다
@@ -76,11 +76,11 @@
 
 ### ADR-007: 릴리스 자동화는 태그 push → Store 제출 → 인증 통과 시 자동 게시
 
-- **상태**: 채택(제출 도구는 확인 후 확정)
-- **결정**: GitHub Actions에서 `vX.Y.Z` 태그를 push하면 빌드, 테스트, 패키지 버전 `X.Y.Z.0`의 MSIX 생성, Store 제출을 차례로 진행하고, 인증을 통과하면 자동으로 게시합니다.
-- **이유**: 태그를 올리는 것 자체가 출시 결정이므로 수작업을 줄입니다.
-- **트레이드오프**: 잘못 올린 태그도 인증만 통과하면 게시됩니다. Entra ID 자격 증명을 관리해야 합니다. 최초 제출은 Partner Center에서 직접 해야 할 수 있습니다.
-- **하네스에 미치는 영향**: 자격 증명과 패키지 식별 정보를 워크플로나 저장소에 하드코딩하지 마세요. GitHub Secrets만 씁니다.
+- **상태**: 채택(제출 도구는 2026-11-05 확정)
+- **결정**: GitHub Actions에서 `vX.Y.Z` 태그를 push하면 빌드, 테스트, 패키지 버전 `X.Y.Z.0`의 `.msixupload` 생성, Store 제출을 차례로 진행하고, 인증을 통과하면 자동으로 게시합니다. 제출 도구는 Microsoft Store Developer CLI(`msstore publish`)입니다. 같은 워크플로를 수동 실행하면 제출하지 않고 패키지만 아티팩트로 만듭니다. 패키지는 x64만 올리고 기호 패키지는 넣지 않습니다.
+- **이유**: 태그를 올리는 것 자체가 출시 결정이므로 수작업을 줄입니다. 스모크로 확인한 아키텍처는 x64뿐입니다. `dotnet build`에는 `mspdbcmf.exe`가 없어 기호 패키지를 만들지 못합니다(2026-11-05 확인).
+- **트레이드오프**: 잘못 올린 태그도 인증만 통과하면 게시됩니다. Entra ID 자격 증명을 관리해야 합니다. Microsoft 문서 기준으로 자동 제출은 이미 게시된 앱에만 쓸 수 있어 최초 제출은 Partner Center에서 직접 합니다. 32비트 Windows에는 설치되지 않고, ARM64 PC에서는 Windows 11의 x64 에뮬레이션에 의존합니다. 기호가 없어 Partner Center의 크래시 분석 정보가 제한됩니다.
+- **하네스에 미치는 영향**: 자격 증명과 패키지 식별 정보를 워크플로나 저장소에 하드코딩하지 마세요. GitHub Secrets만 씁니다. `Package.appxmanifest`의 `Soriseom.Dev`는 개발 패키지용이니 바꾸지 마세요. 실제 값은 `tools/store/Build-StorePackage.ps1`이 빌드하는 동안에만 넣습니다.
 
 ### ADR-008: Win32 P/Invoke는 CsWin32로 생성한다
 

@@ -1,0 +1,58 @@
+name: Store release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version as X.Y.Z
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package-and-submit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: dotnet build Soriseom.slnx -p:Platform=x64
+      - name: Test
+        run: dotnet test --project tests/Soriseom.Core.Tests
+      - name: Check format
+        run: dotnet format Soriseom.slnx --verify-no-changes
+      - name: Build store package
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          PACKAGE_IDENTITY_NAME: ${{ secrets.PACKAGE_IDENTITY_NAME }}
+          PACKAGE_PUBLISHER: ${{ secrets.PACKAGE_PUBLISHER }}
+          PACKAGE_PUBLISHER_DISPLAY_NAME: ${{ secrets.PACKAGE_PUBLISHER_DISPLAY_NAME }}
+        run: tools/store/Build-StorePackage.ps1 -Version ($env:RELEASE_VERSION -replace '^v', '') -IdentityName $env:PACKAGE_IDENTITY_NAME -Publisher $env:PACKAGE_PUBLISHER -PublisherDisplayName $env:PACKAGE_PUBLISHER_DISPLAY_NAME -OutDir store-package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: store-package
+          path: store-package/*.msixupload
+          if-no-files-found: error
+      - uses: microsoft/microsoft-store-apppublisher@v1.4
+        if: github.event_name == 'push'
+        with:
+          version: v0.4.4
+      - name: Configure Store CLI
+        if: github.event_name == 'push'
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+        run: msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+      - name: Submit to the Store
+        if: github.event_name == 'push'
+        env:
+          PRODUCT_ID: ${{ secrets.PRODUCT_ID }}
+        run: msstore publish (Get-Item store-package/*.msixupload).FullName --appId $env:PRODUCT_ID

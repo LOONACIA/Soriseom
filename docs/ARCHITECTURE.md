@@ -71,7 +71,7 @@ App: 팝업 창
 - **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다. 언어 리소스는 번들의 기본 패키지에 넣습니다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store 번들에 한국어가 들어가지 않습니다.
 - **의존성**: Central Package Management로 버전을 고정합니다. 허용 목록은 `docs/ADR.md`의 "원칙"에 있습니다.
 - **품질 게이트**: `Directory.Build.props`에서 Nullable, `TreatWarningsAsErrors`(NU1901~NU1904, IL2104 제외), `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)을 켭니다. StyleCop 규칙 조정은 `docs/ADR.md` ADR-006을 따릅니다.
-- **CI**: GitHub Actions(Windows runner). `.github/workflows/ci.yml`이 브랜치 push와 PR에서 빌드, 테스트, 포맷 검사, x64 Release MSIX 생성을 돌립니다. `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`으로 MSIX를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다(아직 없음, ADR-007).
+- **CI**: GitHub Actions(Windows runner). `.github/workflows/ci.yml`이 브랜치 push와 PR에서 빌드, 테스트, 포맷 검사, x64 Release MSIX 생성을 돌립니다. `.github/workflows/store-release.yml`은 `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`의 `.msixupload`를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다. 수동 실행하면 패키지만 아티팩트로 만듭니다(ADR-007).
 
 ## 구현 전에 확인할 것
 
@@ -82,6 +82,6 @@ App: 팝업 창
 - [x] WinUI 3 창에 Acrylic 배경과 클릭 통과(확장 창 스타일)를 함께 적용할 수 있는지: 됩니다. 2026-11-04에 Windows 11의 임시 창에서 화면 픽셀과 WindowFromPoint로 확인했습니다.
 - [x] Windows 방해 금지 모드를 감지할 공식 API가 있는지: 있습니다. 2026-11-04에 Windows 11(빌드 26300)에서 설정의 스위치를 켜면 `PriorityOnly`, 끄면 `Unrestricted`가 되는 것을 확인했습니다. 더 낮은 버전은 확인하지 않았습니다.
 - [x] 언어 변경이 재시작 없이 반영되는지: `PrimaryLanguageOverride`는 이미 불러온 UI에 바로 반영된다는 보장이 없고 `x:Uid` 문자열도 갱신되지 않으므로, 재시작을 안내합니다.
-- [ ] Store 자동 제출 방식(msstore CLI와 Entra ID 앱 연동), 최초 제출을 수동으로 해야 하는지
+- [x] Store 자동 제출 방식: msstore CLI와 Entra ID 앱을 씁니다. Microsoft 문서 기준으로 이미 게시된 앱에만 쓸 수 있어 최초 제출은 수동으로 합니다(ADR-007). 실제 제출은 아직 시험하지 않았습니다.
 - [ ] Windows 10에서 팝업 바깥이 투명하게 보이는지: 2026-11-04에 Windows 11에서만 확인했습니다. SetLayeredWindowAttributes 없는 레이어드 창은 Windows 10에서 보이지 않을 수 있습니다. Acrylic도 Windows 11에서만 확인했습니다.
 
