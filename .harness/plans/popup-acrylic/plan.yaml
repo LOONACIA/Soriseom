@@ -1,0 +1,340 @@
+id: popup-acrylic
+goal: >
+  팝업 알약의 배경을 단색에서 Acrylic으로 바꿔 docs/PRD.md "2. 팝업 모양과 동작"을 충족한다. 뒤 화면이 흐리게 비치고, 시스템 라이트/다크를 따르고, 알약 바깥은 지금처럼 투명하다.
+  작은 원에서 펴지고 다시 접히는 애니메이션, 클릭 통과, 포커스 유지, 6곳 위치, 크기 설정, 표시 시간은 그대로다. 스모크 스크립트의 media 시나리오가 팝업 뒤가 실제로 비치는지 확인한다.
+  완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 Debug, Release MSIX 생성이 통과하는 상태다. 창 그림자, 새 설정 항목, 다른 항상 위 창과의 앞뒤 순서, Windows 10 확인은 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-popup-acrylic
+    title: show acrylic behind the popup
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "구조 규칙", "주의"), docs/PRD.md("2. 팝업 모양과 동작"), docs/ARCHITECTURE.md("창과 셸 연동 (App)", "구현 전에 확인할 것"),
+      docs/ADR.md(ADR-002, ADR-006, ADR-009, ADR-010), `src/Soriseom.App/PopupWindow.xaml`, `src/Soriseom.App/PopupWindow.xaml.cs`, `src/Soriseom.App/TransparentBackdrop.cs`,
+      `src/Soriseom.App/PopupController.cs`.
+
+      목표: 알약의 단색 배경을 Acrylic으로 바꾸고, 원에서 알약으로 바뀌는 애니메이션이 Acrylic에서도 같은 모양으로 돌게 한다.
+
+      2026-11-04에 임시 WinUI 창(WindowsAppSDK 2.6.4, Windows 11)에서 이 저장소의 창 스타일 그대로 시험한 결과다. 아래 설계는 이 결과에서 나왔으니 다른 방식으로 바꾸지 마라.
+      - `DesktopAcrylicBackdrop`을 그대로 쓰면 팝업은 활성화되지 않으므로 단색으로 보인다. `DesktopAcrylicController`에 `IsInputActive = true`인 설정을 넘겨야 뒤가 비친다.
+      - 창 전체의 `SystemBackdrop`에 Acrylic을 걸면 알약 바깥까지 칠해진다. `SystemBackdropElement`를 써야 알약 안만 칠해진다.
+      - XAML `AcrylicBrush`는 투명 창에서 뒤를 비추지 못하고 대체 색만 나온다.
+      - Composition의 둥근 `RectangleClip`이나 `CompositionGeometricClip`을 `SystemBackdropElement`나 그 조상에 걸면 둥근 모서리가 무시되고 사각형으로 잘린다. 조상 아래의 글자까지 사각형으로 잘린다.
+        그래서 작은 원은 `SystemBackdropElement`의 폭과 `CornerRadius`로 만들고, clip은 형제 요소에만 건다.
+      - Opacity와 Scale은 조상 Visual에 걸어도 Acrylic에 그대로 적용된다.
+      - 폭을 `EnableDependentAnimation` Storyboard로 움직이고 clip과 내용을 `SizeChanged`에서 따라가게 하면, 프레임을 캡처했을 때 Acrylic 가장자리와 테두리 간격이 프레임마다 일정했고, 도중에 끊겨도 그 자리에서 이어졌다.
+      - `WindowFromPoint`로 클릭 통과가 유지되는 것을 확인했다.
+
+      ## 1. `src/Soriseom.App/PopupAcrylicBackdrop.cs` (새 파일)
+      아래 내용 그대로 만든다. 이 코드는 이 저장소의 분석기와 포맷 검사를 통과하는 것을 확인했다.
+      ```csharp
+      using Microsoft.UI.Composition;
+      using Microsoft.UI.Composition.SystemBackdrops;
+      using Microsoft.UI.Xaml;
+      using Microsoft.UI.Xaml.Media;
+
+      namespace Soriseom.App;
+
+      /// <summary>
+      /// Desktop acrylic that stays on in an inactive window. The popup never takes focus, and DesktopAcrylicBackdrop shows a flat color when the window is inactive.
+      /// </summary>
+      internal sealed partial class PopupAcrylicBackdrop : SystemBackdrop
+      {
+          private readonly SystemBackdropConfiguration _configuration = new() { IsInputActive = true };
+          private DesktopAcrylicController? _controller;
+
+          protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
+          {
+              base.OnTargetConnected(connectedTarget, xamlRoot);
+              Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().EnsureSystemDispatcherQueue();
+              CopyDisplayState(connectedTarget, xamlRoot);
+              _controller = new DesktopAcrylicController();
+              _controller.SetSystemBackdropConfiguration(_configuration);
+              _controller.AddSystemBackdropTarget(connectedTarget);
+          }
+
+          protected override void OnDefaultSystemBackdropConfigurationChanged(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
+          {
+              CopyDisplayState(target, xamlRoot);
+          }
+
+          protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop disconnectedTarget)
+          {
+              _controller?.RemoveSystemBackdropTarget(disconnectedTarget);
+              _controller?.Dispose();
+              _controller = null;
+              base.OnTargetDisconnected(disconnectedTarget);
+          }
+
+          // Everything except IsInputActive, which the default configuration turns off for this window.
+          private void CopyDisplayState(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
+          {
+              var current = GetDefaultSystemBackdropConfiguration(target, xamlRoot);
+              _configuration.Theme = current.Theme;
+              _configuration.IsHighContrast = current.IsHighContrast;
+              _configuration.HighContrastBackgroundColor = current.HighContrastBackgroundColor;
+          }
+      }
+      ```
+      `OnDefaultSystemBackdropConfigurationChanged`에서 base를 부르지 마라. 이유: `TransparentBackdrop`의 주석대로 다른 프로젝트에서 테마 전환 때 base 처리기가 실패한 적이 있고, 시험한 코드도 부르지 않았다.
+
+      ## 2. `src/Soriseom.App/PopupWindow.xaml`
+      `Viewbox` 안의 구조만 다음처럼 바꾼다. `ContentRow`와 그 자식은 한 단계 안으로 옮길 뿐 내용을 고치지 마라. 이유: `tools/smoke/Smoke.ps1`이 `TitleText`로 창을 찾는다.
+      ```xml
+      <Grid x:Name="Island" Width="360" Height="80">
+          <SystemBackdropElement
+              x:Name="IslandBackdrop"
+              Width="80"
+              HorizontalAlignment="Center"
+              CornerRadius="40" />
+          <Grid
+              x:Name="IslandForeground"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              BorderThickness="1"
+              CornerRadius="40">
+              <Border
+                  x:Name="SolidFallback"
+                  Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                  Visibility="Collapsed" />
+              <Grid x:Name="ContentRow" Padding="11,11,19,11" ColumnSpacing="12">
+                  <!-- 지금 ContentRow의 내용 그대로 -->
+              </Grid>
+          </Grid>
+      </Grid>
+      ```
+      `Island`에는 `Background`, `BorderBrush`, `CornerRadius`를 두지 마라. 이유: 이제 Opacity와 Scale만 받는 틀이고, 둥근 모양은 두 자식이 각자 만든다.
+
+      ## 3. `src/Soriseom.App/PopupWindow.xaml.cs`
+      - using 추가: `Microsoft.UI.Composition.SystemBackdrops`, `Microsoft.UI.Xaml.Media.Animation`, `Windows.Foundation`.
+      - 필드 추가: `private Storyboard? _widthAnimation;`
+      - 생성자: `_islandVisual.Clip = _clip;`을 `ElementCompositionPreview.GetElementVisual(IslandForeground).Clip = _clip;`로 바꾼다. `_islandVisual`은 Opacity와 Scale, `CenterPoint`에 그대로 쓴다.
+        `_easing`을 만든 다음 줄에 넣는다:
+        ```csharp
+        IslandBackdrop.SizeChanged += (_, args) => FollowBackdropWidth(args.NewSize.Width);
+        if (DesktopAcrylicController.IsSupported())
+        {
+            IslandBackdrop.SystemBackdrop = new PopupAcrylicBackdrop();
+        }
+        else
+        {
+            SolidFallback.Visibility = Visibility.Visible;
+        }
+        ```
+      - 새 메서드 두 개:
+        ```csharp
+        // Composition drops a rounded clip on the acrylic and on its ancestors, so the round shape comes from the acrylic's own
+        // size and corner radius. Its width is layout, so the clip and the content follow it to stay on the same frame.
+        private void AnimateBackdropWidth(double from, double to, TimeSpan duration, TimeSpan delay)
+        {
+            _widthAnimation?.Stop();
+            IslandBackdrop.Width = from;
+            var frames = new DoubleAnimationUsingKeyFrames { EnableDependentAnimation = true, BeginTime = delay };
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(duration),
+                Value = to,
+                KeySpline = new KeySpline { ControlPoint1 = new Point(0.2, 0), ControlPoint2 = new Point(0, 1) },
+            });
+            Storyboard.SetTarget(frames, IslandBackdrop);
+            Storyboard.SetTargetProperty(frames, "Width");
+            _widthAnimation = new Storyboard();
+            _widthAnimation.Children.Add(frames);
+            _widthAnimation.Begin();
+        }
+
+        private void FollowBackdropWidth(double width)
+        {
+            float left = (WidthDip - (float)width) / 2;
+            _clip.Left = left;
+            _clip.Right = WidthDip - left;
+            _contentVisual.Properties.InsertVector3("Translation", new Vector3(left, 0, 0));
+        }
+        ```
+        `_widthAnimation?.Stop();` 다음에 `Width`를 넣는 순서를 지켜라. 이유: 끝난 Storyboard가 값을 붙들고 있으면 지역 값이 먹지 않고, 끊긴 애니메이션은 지금 폭에서 이어져야 한다.
+      - `AnimateScalar`를 `private void AnimateOpacity(float to, TimeSpan duration, TimeSpan delay)`로 바꾸고 마지막 줄을 `_islandVisual.StartAnimation("Opacity", animation);`로 한다. 다른 호출자가 없어진다.
+      - `StartOpenAnimation`의 시그니처를 `(double fromWidth, TimeSpan spreadDelay)`로 바꾸고, 본문의 애니메이션을 다음 셋으로 한다: `AnimateOpacity(1, _appearOpacityDuration, TimeSpan.Zero);`,
+        `AnimateScale(1, _appearScaleDuration, TimeSpan.Zero);`, `AnimateBackdropWidth(fromWidth, WidthDip, _spreadDuration, spreadDelay);`.
+      - `ShowTrack`: 숨겨진 상태 분기의 `_clip.Left`, `_clip.Right`, `InsertVector3` 세 줄을 `FollowBackdropWidth(HeightDip);` 한 줄로 바꾼다. 이유: 창이 보이기 전에 작은 원 상태여야 하고, `SizeChanged`는 다음 레이아웃에야 온다.
+        `StartOpenAnimation(_appearScaleDuration)`은 `StartOpenAnimation(HeightDip, _appearScaleDuration)`으로, `StartOpenAnimation(TimeSpan.Zero)`는 `StartOpenAnimation(IslandBackdrop.ActualWidth, TimeSpan.Zero)`로 바꾼다.
+      - `HidePopup`: clip Left, clip Right, Translation.X를 움직이는 `AnimateScalar` 세 줄을 `AnimateBackdropWidth(IslandBackdrop.ActualWidth, HeightDip, _collapseDuration, TimeSpan.Zero);` 한 줄로 바꾸고,
+        Opacity 줄은 `AnimateOpacity(0, _disappearOpacityDuration, _collapseDuration);`로 바꾼다. Scoped batch와 `version` 검사, `AppWindow.Hide()`는 그대로 둔다.
+      - 시간과 이징 값은 그대로 둔다. `CollapsedLeftDip`, `CollapsedRightDip`은 생성자의 clip 초기값에 계속 쓴다. 공개 메서드 `ShowTrack`, `UpdateThumbnail`, `HidePopup`의 시그니처를 바꾸지 마라. 이유: `PopupController`가 그대로 부른다.
+
+      ## 4. docs/ARCHITECTURE.md
+      - "창과 셸 연동 (App)"의 **팝업 창** 항목에서 "`SetLayeredWindowAttributes`를 부르거나 DWM 둥근 모서리를 켜면 바탕이 불투명해집니다." 문장 바로 뒤에 넣는다:
+        `Acrylic은 SystemBackdropElement에 PopupAcrylicBackdrop을 붙여 알약 안에만 입힙니다. 창이 활성화되지 않아 기본 DesktopAcrylicBackdrop은 단색으로 보이므로 IsInputActive를 켠 채 둡니다. Composition의 둥근 clip은 Acrylic과 그 조상에서 무시되므로, 작은 원은 Acrylic 요소의 폭과 CornerRadius로 만들고 테두리와 내용의 clip이 그 폭을 따라갑니다. 폭은 레이아웃 속성이라 이 애니메이션만 UI 스레드에서 돕니다. Acrylic을 지원하지 않는 환경에서는 단색 배경을 씁니다.` (타입 이름에는 백틱을 붙인다)
+      - "구현 전에 확인할 것"의 Acrylic 항목을 다음으로 바꾼다: `- [x] WinUI 3 창에 Acrylic 배경과 클릭 통과(확장 창 스타일)를 함께 적용할 수 있는지: 됩니다. 2026-11-04에 Windows 11의 임시 창에서 화면 픽셀과 WindowFromPoint로 확인했습니다.`
+      - 같은 목록의 Windows 10 항목 끝에 문장을 더한다: `Acrylic도 Windows 11에서만 확인했습니다.`
+      docs/PRD.md는 고치지 마라. 이유: 이미 Acrylic이라고 적혀 있고 이 스텝으로 코드가 그 내용과 맞게 된다.
+
+      ## 하지 말 것
+      - `TransparentBackdrop`, 창 확장 스타일, `DWMWCP_DONOTROUND`를 바꾸지 마라. 이유: 알약 바깥의 투명을 만드는 조합이고 시험에서 Acrylic과 함께 동작했다.
+      - `SetWindowRgn`, `AcrylicBrush`, `CompositionGeometricClip`, `DispatcherQueueTimer`, `CompositionTarget.Rendering`을 쓰지 마라. 이유: 위 시험 결과와 다른 경로이거나 필요하지 않다.
+      - 창을 프레임마다 옮기거나 크기를 바꾸지 마라. 이유: 창은 고정이어야 스모크의 위치 검사와 클릭 통과 영역이 그대로다.
+      - Acrylic 투명도나 색을 고르는 설정을 추가하지 마라. 이유: docs/PRD.md에 없는 설정이다. 창 그림자도 넣지 마라.
+      - `PopupController`, `TransparentBackdrop.cs`, Core, 테스트, `tools/smoke/`를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.App/PopupAcrylicBackdrop.cs
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-smoke-acrylic-check
+    title: check in the smoke script that the popup shows what is behind it
+    type: feat
+    scope: tools
+    description: |
+      먼저 읽을 파일: CLAUDE.md("주의"), docs/ADR.md(ADR-009), `tools/smoke/Smoke.ps1`(`Check`, `Wait-For`, `Watch-FixtureTracks`, `Test-Media`, `Test-PopupBounds`, `Save-ElementScreenshot`), `tools/smoke/MediaFixture.ps1`,
+      `src/Soriseom.App/PopupWindow.xaml`(이전 스텝이 Acrylic을 넣었다).
+
+      목표: media 시나리오가 팝업을 빨강과 파랑으로 나뉜 띠 위에 띄우고, 스크린샷에서 알약 왼쪽과 오른쪽 색이 다른지 본다. 이유: Acrylic이 조용히 단색으로 떨어지는 것이 이 기능의 주된 실패 방식인데(비활성 창의 기본 동작, Release 트리밍),
+      빌드와 지금 스모크 항목으로는 드러나지 않는다.
+
+      2026-11-04에 임시 창으로 시험한 값이다. 알약 안 25%와 75% 열, 12% 행의 색이 라이트 테마에서 (255,213,213)과 (214,214,255), 다크 테마에서 (135,7,7)과 (21,21,223)이었다. 채널별 차이의 최댓값은 42와 216이고, 단색 배경이면 0이다.
+      창 네 모서리는 알약 바깥이라 띠 색 그대로였다. 띠 창에 `WS_EX_TOPMOST`를 켜면 팝업이 띠 아래에 가려졌으므로 켜지 마라.
+
+      이 스텝의 파일은 파일 편집 도구로만 고치고 실행하지 마라. 이유: `.codex/hooks/guard.py`가 `tools/smoke/` 경로가 들어간 셸 명령을 막고, 스모크는 계획 마무리 때 Claude가 돌린다.
+
+      ## 1. `tools/smoke/BackdropFixture.ps1` (새 파일)
+      아래 내용 그대로 만든다. Windows PowerShell 5.1에서 실행되는 것을 확인했다.
+      ```powershell
+      # Shows a red and blue band behind the popup, so the smoke test can tell acrylic from a solid color.
+      # Runs in its own process because a form needs a message loop, and the smoke script is busy polling.
+      param(
+          [int] $X,
+          [int] $Y,
+          [int] $Width,
+          [int] $Height,
+          [string] $ReadyPath
+      )
+
+      $ErrorActionPreference = 'Stop'
+
+      Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+      Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+      using System;
+      using System.Runtime.InteropServices;
+      using System.Windows.Forms;
+      public static class BackdropNative {
+          [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+      }
+      public class BackdropForm : Form {
+          protected override bool ShowWithoutActivation { get { return true; } }
+          protected override CreateParams CreateParams {
+              get {
+                  // WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE
+                  CreateParams parameters = base.CreateParams;
+                  parameters.ExStyle |= 0x80 | 0x08000000;
+                  return parameters;
+              }
+          }
+      }
+      '@
+      # Per-monitor aware, so the bounds are the physical pixels the smoke script computed.
+      [void][BackdropNative]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
+
+      $form = New-Object BackdropForm
+      $form.FormBorderStyle = 'None'
+      $form.ShowInTaskbar = $false
+      $form.StartPosition = 'Manual'
+      $form.Bounds = New-Object System.Drawing.Rectangle $X, $Y, $Width, $Height
+      $form.BackColor = [System.Drawing.Color]::Red
+      $right = New-Object System.Windows.Forms.Panel
+      $right.BackColor = [System.Drawing.Color]::Blue
+      $right.Bounds = New-Object System.Drawing.Rectangle ([int]($Width / 2)), 0, ($Width - [int]($Width / 2)), $Height
+      $form.Controls.Add($right)
+      $form.Add_Shown({ Set-Content -LiteralPath $ReadyPath -Value 'ready' })
+      [System.Windows.Forms.Application]::Run($form)
+      ```
+      PowerShell here-string의 닫는 `'@`는 파일에서 0열에 있어야 한다. 위 코드 블록의 들여쓰기를 빼고 저장해라.
+
+      ## 2. `tools/smoke/Smoke.ps1`
+      - `Watch-FixtureTracks` 앞에 함수를 추가한다:
+        ```powershell
+        # A red and blue band behind the top center of the work area, where the popup of the fixture tracks appears.
+        # Not topmost: the popup would stay under it.
+        function Start-BackdropFixture {
+            $workArea = [SmokeNative+RECT]::new()
+            [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+            $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+            $width = [int](480 * $dpiScale)
+            $height = [int](112 * $dpiScale)
+            $x = [int](($workArea.Left + $workArea.Right - $width) / 2)
+            $readyPath = Join-Path $OutDir 'backdrop-fixture.txt'
+            Remove-Item $readyPath -Force -ErrorAction SilentlyContinue
+            $fixturePath = Join-Path $PSScriptRoot 'BackdropFixture.ps1'
+            $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
+                '-X', $x, '-Y', $workArea.Top, '-Width', $width, '-Height', $height, '-ReadyPath', "`"$readyPath`"")
+            if (-not (Wait-For { Test-Path $readyPath })) {
+                Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue
+                throw 'the backdrop fixture did not start'
+            }
+
+            Remove-Item $readyPath -Force
+            return $fixture
+        }
+        ```
+      - `Watch-FixtureTracks`: `$fixture = Start-Process ...` 바로 앞에 `$backdrop = Start-BackdropFixture`를 넣고, `finally`의 마지막 줄에 `Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue`를 넣는다.
+        띠를 먼저 띄운다. 이유: 띠가 팝업보다 늦게 나타나면 스크린샷이 띠 없이 찍힌다.
+      - `Test-Media` 앞에 함수를 추가한다:
+        ```powershell
+        # Acrylic lets the two colors of the band through, and a solid background looks the same on both sides.
+        function Test-PopupAcrylic([string] $ScreenshotName) {
+            $path = Join-Path $OutDir "$ScreenshotName.png"
+            if (-not (Test-Path $path)) {
+                Check 'the popup lets what is behind it show through' $false 'no screenshot was taken'
+                return
+            }
+
+            $bitmap = [System.Drawing.Bitmap]::new($path)
+            try {
+                # The corners are outside the pill, so they show the band unless another window covers it.
+                $red = [System.Drawing.Color]::Red.ToArgb()
+                $blue = [System.Drawing.Color]::Blue.ToArgb()
+                if ($bitmap.GetPixel(0, 0).ToArgb() -ne $red -or $bitmap.GetPixel($bitmap.Width - 1, 0).ToArgb() -ne $blue) {
+                    $script:UnavailableReason = 'another window covered the popup backdrop, so the acrylic check says nothing; run again without it'
+                    Write-Line "SKIP acrylic: $script:UnavailableReason"
+                    return
+                }
+
+                # Above the text and right of the album art.
+                $row = [int]($bitmap.Height * 0.12)
+                $left = $bitmap.GetPixel([int]($bitmap.Width * 0.25), $row)
+                $right = $bitmap.GetPixel([int]($bitmap.Width * 0.75), $row)
+                $difference = ([Math]::Abs($left.R - $right.R), [Math]::Abs($left.G - $right.G), [Math]::Abs($left.B - $right.B) | Measure-Object -Maximum).Maximum
+                Check 'the popup lets what is behind it show through' ($difference -ge 16) "left ($($left.R),$($left.G),$($left.B)), right ($($right.R),$($right.G),$($right.B)); transparency effects or battery saver can also turn acrylic off"
+            } finally {
+                $bitmap.Dispose()
+            }
+        }
+        ```
+      - `Test-Media`: `if ($first.Shown) { ... }` 블록의 마지막, 확장 스타일 `Check` 다음 줄에 `Test-PopupAcrylic 'popup'`을 넣는다. `Test-PopupSize`에는 넣지 마라. 이유: 크기와 상관없는 같은 검사를 두 번 돌릴 필요가 없다.
+      다른 시나리오와 판정은 고치지 마라. `Save-ElementScreenshot`과 `Watch-Popup`은 그대로 쓴다.
+
+      ## 3. docs/ADR.md
+      ADR-009 "스크립트가 못 보는 항목"의 "모양과 느낌" 항목 끝에 문장을 더한다: `Acrylic으로 뒤가 비치는지는 media 시나리오가 확인합니다. Windows 설정에서 투명 효과를 껐을 때 글자가 읽히는지는 사람이 확인합니다.`
+      다른 ADR은 고치지 마라.
+
+      ## 하지 말 것
+      - 띠 창에 `WS_EX_TOPMOST`나 `TopMost`를 켜지 마라. 이유: 위 시험에서 팝업이 띠에 가려졌다.
+      - 픽셀 값을 넘어 곡 제목이나 창 내용을 출력하지 마라. 이유: ADR-009, 사용자의 데이터를 출력에 남기지 않는다.
+      - 새 시나리오 이름을 만들지 마라. 이유: media 시나리오가 이미 이 팝업을 띄우고, CLAUDE.md의 명령 목록을 바꿀 필요가 없다.
+      - App, Core, 테스트를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱과 스크립트를 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - tools/smoke/BackdropFixture.ps1
+      - tools/smoke/Smoke.ps1
+      - docs/ADR.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
