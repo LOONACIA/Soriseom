@@ -8,6 +8,8 @@
     Starts from default settings and restores the user's settings, startup state and do not disturb when it ends, including
     on the next run if this one dies.
 
+    Saves the app's popup trace to app-trace.log in OutDir. A Release build has no trace, so only the script's own lines appear there.
+
     Only Claude runs this. Codex must not, see docs/ADR.md ADR-009.
 
     Exit codes: 0 all checks passed, 1 a check failed, 3 this desktop cannot run the checks right now
@@ -24,7 +26,7 @@
     Read-only check to run after a real sign-in: no build, no deploy, no launch.
 
 .PARAMETER OutDir
-    Where screenshots go. Defaults to a new temp directory.
+    Where screenshots and app-trace.log go. Defaults to a new temp directory.
 
 .EXAMPLE
     pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Scenario language,media
@@ -42,7 +44,10 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 Add-Type -TypeDefinition @'
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 public static class SmokeNative {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
@@ -56,6 +61,55 @@ public static class SmokeNative {
     [DllImport("user32.dll")] public static extern bool SystemParametersInfoW(uint action, uint param, out RECT rect, uint winIni);
     [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
     [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);
+}
+
+// Saves the app's PopupTrace lines beside the script's own marks. The app writes them through OutputDebugString.
+public static class SmokeTrace {
+    const string Prefix = "SoriseomTrace ";
+    static readonly object Gate = new object();
+    static StreamWriter writer;
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateEventW(IntPtr attributes, bool manualReset, bool initialState, string name);
+    [DllImport("kernel32.dll")] static extern bool SetEvent(IntPtr handle);
+    [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileMappingW(IntPtr file, IntPtr attributes, uint protect, uint sizeHigh, uint sizeLow, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr MapViewOfFile(IntPtr mapping, uint access, uint offsetHigh, uint offsetLow, UIntPtr bytes);
+
+    public static void Start(string path) {
+        IntPtr ready = CreateEventW(IntPtr.Zero, false, false, "DBWIN_BUFFER_READY");
+        IntPtr data = CreateEventW(IntPtr.Zero, false, false, "DBWIN_DATA_READY");
+        IntPtr mapping = CreateFileMappingW(new IntPtr(-1), IntPtr.Zero, 4, 0, 4096, "DBWIN_BUFFER");
+        IntPtr view = mapping == IntPtr.Zero ? IntPtr.Zero : MapViewOfFile(mapping, 4, 0, 0, new UIntPtr(4096));
+        if (ready == IntPtr.Zero || data == IntPtr.Zero || view == IntPtr.Zero) {
+            throw new System.ComponentModel.Win32Exception();
+        }
+
+        writer = new StreamWriter(path, false, new UTF8Encoding(false));
+        var thread = new Thread(() => {
+            while (true) {
+                SetEvent(ready);
+                if (WaitForSingleObject(data, 1000) != 0) continue;
+                int pid = Marshal.ReadInt32(view);
+                string message = Marshal.PtrToStringAnsi(view + 4);
+                if (message != null && message.StartsWith(Prefix, StringComparison.Ordinal)) {
+                    Append("app pid=" + pid + " " + message.Substring(Prefix.Length).TrimEnd());
+                }
+            }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+    }
+
+    public static void Mark(string text) {
+        Append("smoke " + text);
+    }
+
+    static void Append(string text) {
+        lock (Gate) {
+            if (writer == null) return;
+            writer.WriteLine(DateTime.Now.ToString("HH:mm:ss.fff") + " " + text);
+            writer.Flush();
+        }
+    }
 }
 '@
 # Per-monitor aware, so UI Automation, window rects and screenshots all use physical pixels.
@@ -274,6 +328,7 @@ function Get-AppProcess {
 function Stop-App {
     Get-AppProcess | ForEach-Object { Stop-Process -Id $_.Id -Force }
     [void](Wait-For { (Get-AppProcess).Count -eq 0 })
+    [SmokeTrace]::Mark('app stopped')
 }
 
 function Start-AppActivation {
@@ -310,6 +365,7 @@ function Open-Settings {
     # A first launch after registering can take a while.
     if (-not (Wait-For { Get-SettingsWindow } 30000)) { throw 'the settings window did not open' }
     [void](Wait-For { (Get-AppProcess).Count -eq 1 })
+    [SmokeTrace]::Mark('settings window open')
 }
 
 function Close-Settings {
@@ -470,10 +526,14 @@ function Watch-Popup([string] $Title, [string] $ScreenshotName) {
         if ($current -eq $Title) { $popup = $candidate } else { Start-Sleep -Milliseconds 40 }
     }
 
-    if (-not $popup) { return $seen }
+    if (-not $popup) {
+        [SmokeTrace]::Mark("popup not seen $Title")
+        return $seen
+    }
 
     # From here on only Win32 state decides: a UI Automation read can fail for a moment while the window is up.
     $seen.Shown = $true
+    [SmokeTrace]::Mark("popup seen $Title")
     $shownAt = $watch.Elapsed.TotalSeconds
     $handle = [IntPtr]$popup.Current.NativeWindowHandle
     $seen.ExStyle = [SmokeNative]::GetWindowLong($handle, -20)
@@ -495,6 +555,7 @@ function Watch-Popup([string] $Title, [string] $ScreenshotName) {
         Start-Sleep -Milliseconds 40
     }
 
+    [SmokeTrace]::Mark("popup gone $Title")
     $seen.Duration = $watch.Elapsed.TotalSeconds - $shownAt
     return $seen
 }
@@ -533,6 +594,7 @@ function Watch-FixtureTracks([string] $ScreenshotName, [switch] $AllowDoNotDistu
     Remove-Item $statusPath -Force -ErrorAction SilentlyContinue
     $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
     $backdrop = Start-BackdropFixture
+    [SmokeTrace]::Mark('fixture start')
     $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
         '-AppId', $FixtureAppId, '-FirstTitle', $FirstTrack, '-SecondTitle', $SecondTrack,
@@ -548,6 +610,7 @@ function Watch-FixtureTracks([string] $ScreenshotName, [switch] $AllowDoNotDistu
 
     if (-not (Test-Path $statusPath)) { throw 'the media fixture wrote no status' }
     $status = Get-Content $statusPath -Raw | ConvertFrom-StringData
+    [SmokeTrace]::Mark("fixture done current first=$($status[$FirstTrack]) second=$($status[$SecondTrack]) shown first=$($first.Shown) second=$($second.Shown) fullscreen first=$($first.FullScreen) second=$($second.FullScreen)")
     Remove-Item $statusPath -Force
     $reason = $null
     if ($status[$FirstTrack] -ne 'True' -or $status[$SecondTrack] -ne 'True') {
@@ -806,6 +869,12 @@ if ($unknown) { throw "unknown scenario: $unknown. Choose from: $($scenarios.Key
 if (-not $OutDir) { $OutDir = Join-Path ([IO.Path]::GetTempPath()) "soriseom-smoke-$(Get-Date -Format yyyyMMdd-HHmmss)" }
 [void](New-Item -ItemType Directory -Force -Path $OutDir)
 $OutDir = (Resolve-Path $OutDir).Path
+$TracePath = Join-Path $OutDir 'app-trace.log'
+try {
+    [SmokeTrace]::Start($TracePath)
+} catch {
+    Write-Line "app trace unavailable: $($_.Exception.Message)"
+}
 
 if (Test-Path $BackupFile) {
     Write-Line 'an earlier run did not finish; restoring its backup first'
@@ -826,6 +895,7 @@ try {
 
     foreach ($name in $selected) {
         Write-Line "--- $name"
+        [SmokeTrace]::Mark("scenario $name")
         try {
             & $scenarios[$name]
         } catch {
@@ -838,6 +908,7 @@ try {
     if (Test-Path $BackupFile) { Restore-UserState }
 }
 
+Write-Line "app trace $TracePath"
 if ($script:FailedChecks -eq 0 -and -not $script:UnavailableReason) { exit 0 }
 
 # A desktop that locked mid-run fails checks that say nothing about the code.
