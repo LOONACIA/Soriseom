@@ -1,0 +1,146 @@
+id: store-listing-privacy
+goal: >
+  docs/PRD.md "출시 준비"에서 Claude 몫으로 남은 "Store 등록 문구 한국어/영어 초안과 개인정보 처리방침"을 저장소에 추가한다.
+  저장소 루트의 PRIVACY.md는 Microsoft Store 정책 10.5.1이 요구하는 내용을 앱의 실제 동작과 맞게 한국어와 영어로 적고, Partner Center에 넣을 URL로 쓴다.
+  docs/store-listing.md는 Partner Center에 붙여 넣을 등록 문구(ko-KR, en-US)와 공통 입력값, 제출 전 확인 목록을 담는다.
+  완료는 두 문서가 있고 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)가 통과하는 상태다.
+  앱 코드와 리소스 변경, 앱 안의 개인정보 처리방침 링크, 스크린샷, 실제 Store 제출, 자동 제출 CI는 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-privacy-policy
+    title: add the privacy policy
+    type: docs
+    description: |
+      먼저 읽을 파일: CLAUDE.md("언어"), docs/PRD.md("핵심 기능", "범위 밖", "제약"), docs/ADR.md(ADR-005), README.md,
+      src/Soriseom.App/SettingsStore.cs, src/Soriseom.App/MediaSessionAdapter.cs, src/Soriseom.App/PopupController.cs,
+      src/Soriseom.App/PopupWindow.xaml.cs(`LoadThumbnailAsync`), src/Soriseom.App/Package.appxmanifest.
+
+      목표: 저장소 루트에 `PRIVACY.md`를 추가한다. Partner Center에 넣을 URL은 `https://github.com/LOONACIA/Soriseom/blob/main/PRIVACY.md`다.
+      이 문서는 사용자가 읽는 글이다. 코드 식별자나 내부 파일 이름을 본문에 쓰지 말고 평이한 말로 쓴다.
+
+      Microsoft Store 정책 10.5.1은 Win32/Desktop Bridge 앱에 개인정보 처리방침을 항상 요구하고, 다음을 알리라고 한다:
+      접근·수집·전송하는 개인정보, 사용·저장·보호 방법, 제공받는 상대의 종류, 사용자의 통제 수단과 접근 방법. 아래 절이 각각을 맡는다.
+
+      ## 1. `PRIVACY.md` 구조
+      README.md처럼 맨 위에 제목 `# Soriseom (소리섬) Privacy Policy`와 `[한국어](#한국어) | [English](#english)`를 두고, 그 아래 `## 한국어`와 `## English`를 같은 순서와 같은 내용으로 쓴다.
+      각 언어의 맨 끝에 최종 수정일 `2026-11-04`를 적는다. 절 제목은 언어별로 자연스럽게 쓴다.
+
+      절과 내용(이 사실만 쓴다):
+      1. 요약: 소리섬은 곡 정보를 화면에 잠깐 보여 주기 위해 기기 안에서만 읽는다. 계정이 없고, 네트워크로 아무것도 보내지 않으며, 데이터를 수집하지 않는다.
+      2. 앱이 읽는 정보:
+         - Windows 미디어 세션의 제목, 아티스트, 앨범아트, 재생 상태, 재생 중인 앱의 식별자. 팝업을 띄울지 판단하고 표시하는 데만 쓴다. 메모리에만 두고 디스크에 저장하지 않는다.
+         - 전체화면 앱 사용 여부, Windows 방해 금지 상태, 작업 표시줄 테마. 팝업을 숨길지 판단하거나 트레이 아이콘 색을 고르는 데만 쓰고 저장하지 않는다.
+      3. 기기에 저장하는 정보: 표시 시간, 위치, 크기, 전체화면일 때 숨기기, 언어 설정과, 지금까지 감지된 미디어 앱의 식별자 및 앱별 켜기/끄기.
+         Windows의 앱 전용 데이터 영역에 저장하고 별도로 암호화하지 않는다. 로그인 시 자동 실행 여부는 Windows가 관리한다.
+      4. 전송과 공유: 앱은 네트워크 요청을 하지 않는다. 텔레메트리, 크래시 리포트, 로그 파일, 광고가 없고 어떤 제3자에게도 정보를 제공하지 않는다.
+      5. Microsoft Store와 Windows: 이 방침은 앱에만 적용된다. Store를 통한 설치와 Windows의 동작은 Microsoft 개인정보처리방침(`https://www.microsoft.com/privacy/privacystatement`)을 따른다.
+         개발자는 Partner Center에서 Microsoft가 제공하는 설치 수, 오류 통계 같은 집계 보고서를 볼 수 있다. 앱이 이를 위해 따로 보내는 정보는 없다.
+      6. 사용자의 선택: 설정 창에서 저장된 설정과 감지된 앱 목록을 볼 수 있고, 앱별로 팝업을 끌 수 있다. 트레이 메뉴에서 앱을 종료하면 곡 정보를 읽지 않는다. 앱을 제거하면 저장된 정보도 Windows가 함께 지운다.
+         앱을 꺼도 목록에서 그 행이 지워지지는 않는다고 적는다. 이유: 앱에 행을 지우는 기능이 없다(`AppSettings.WithAppSeen`은 추가만 한다).
+      7. 변경: 앱이 읽거나 저장하는 정보가 바뀌면 이 문서와 최종 수정일을 고치고, 이전 내용은 저장소 기록에서 볼 수 있다.
+      8. 문의: `https://github.com/LOONACIA/Soriseom/issues`. 공개 게시판이므로 개인정보를 적지 말라고 안내한다.
+
+      금지:
+      - 이메일, 전화번호, 주소를 쓰지 마라. 이유: 공개 저장소이고 문의 창구는 GitHub Issues 하나다.
+      - "완벽하게 안전", "해킹 불가능"처럼 보장하는 표현과 특정 법률 조항 인용을 쓰지 마라. 이유: 확인하지 않은 약속이 된다.
+      - Microsoft Store나 Windows도 데이터를 전혀 처리하지 않는다고 쓰지 마라. 이유: 앱에 대해서만 말할 수 있다.
+      - 위 목록에 없는 데이터 항목이나 기능을 지어내지 마라. 코드를 읽다가 위 사실과 어긋나는 점을 찾으면 문서를 임의로 맞추지 말고 blockers에 적어라.
+
+      ## 2. `README.md`
+      `### 라이선스` 바로 앞에 `### 개인정보 처리방침`과 `[PRIVACY.md](PRIVACY.md)` 링크를, `### License` 바로 앞에 `### Privacy`와 같은 링크를 추가한다. 나머지 줄은 고치지 마라.
+
+      ## 3. `docs/ARCHITECTURE.md`
+      - "디렉토리 구조"의 `stylecop.json` 줄 다음에 `PRIVACY.md                  # 개인정보 처리방침. Partner Center에 이 파일의 URL을 넣음`을 추가한다.
+      - "횡단 관심사"의 **설정 저장** 항목 끝에 `앱이 읽거나 저장하는 정보의 종류가 바뀌면 루트의 `PRIVACY.md`도 함께 고칩니다(Store 정책 10.5.1).`를 덧붙인다.
+
+      앱 코드와 `.resw`를 고치지 마라. 이유: 앱 안의 링크는 이 계획 밖이다. `docs/store-listing.md`를 만들지 마라. 이유: 다음 스텝에서 만든다.
+    expected_files:
+      - PRIVACY.md
+      - README.md
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'git grep --untracked -q "## 한국어" -- PRIVACY.md'
+      - 'git grep --untracked -q "## English" -- PRIVACY.md'
+      - 'git grep --untracked -q -F -e "https://github.com/LOONACIA/Soriseom/issues" -- PRIVACY.md'
+      - 'git grep --untracked -q -F -e "https://www.microsoft.com/privacy/privacystatement" -- PRIVACY.md'
+      - 'git grep --untracked -q -F -e "2026-11-04" -- PRIVACY.md'
+      - 'git grep --untracked -q -F -e "(PRIVACY.md)" -- README.md'
+      - 'git grep --untracked -q -F -e "PRIVACY.md" -- docs/ARCHITECTURE.md'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+
+  - id: s2-store-listing
+    title: draft the store listing in korean and english
+    type: docs
+    description: |
+      먼저 읽을 파일: CLAUDE.md("언어"), docs/PRD.md(전체), docs/ADR.md(ADR-001, ADR-005, ADR-009, ADR-010), docs/ARCHITECTURE.md("구현 전에 확인할 것"), PRIVACY.md(이전 스텝),
+      src/Soriseom.App/Strings/ko-KR/Resources.resw와 src/Soriseom.App/Strings/en-US/Resources.resw(`AppDisplayName`, `AppDescription`).
+
+      목표: Partner Center에 그대로 붙여 넣을 등록 문구 초안 `docs/store-listing.md`를 추가한다.
+      문서의 안내 글은 한국어로, ko-KR 문구는 한국어로, en-US 문구는 영어로 쓴다. 영어는 직역하지 말고 자연스럽게 쓴다. 문구의 한국어는 "-합니다" 체로 쓴다.
+
+      ## 1. `docs/store-listing.md` 구조(이 제목을 그대로 쓴다)
+      - `# Store 등록 문구 초안`: 2026-11-04 기준 Partner Center 문서의 제한을 따른 초안이라고 한 줄로 적는다.
+      - `## 제출 전 확인`: 아래 네 항목을 체크리스트로 적는다.
+        - Windows 10 실제 동작 미확인: 매니페스트 최소 버전이 10.0.17763이라 Store가 Windows 10에도 제공하는데, 팝업 투명 처리와 Acrylic은 Windows 11에서만 확인했다(docs/ARCHITECTURE.md "구현 전에 확인할 것").
+        - Description에 적은 Spotify와 YouTube Music을 실제 앱에서 확인한다. 확인하지 못한 이름은 Description에서 뺀다.
+        - 앨범아트 로드, 트레이 메뉴와 종료, Windows 모드 전환을 사람이 확인한다(ADR-010).
+        - `PRIVACY.md`가 `main`에 머지되어 URL이 열리는지 확인한다.
+      - `## 공통 입력값`: 아래 값을 표로 적는다.
+        - 주 카테고리 `Utilities + tools`, 보조 카테고리 `Music`. 사유도 적는다: Store의 Music은 음악을 듣거나 만드는 앱이고, 이 앱은 재생하지 않는다.
+        - 가격: 무료.
+        - 개인정보 접근 여부: Yes. 사유: 곡 정보를 읽고, 정책 10.5.1이 Win32/Desktop Bridge 앱에 방침을 항상 요구한다.
+        - Privacy policy URL `https://github.com/LOONACIA/Soriseom/blob/main/PRIVACY.md`, Website `https://github.com/LOONACIA/Soriseom`, Support contact `https://github.com/LOONACIA/Soriseom/issues`.
+        - 비워 두는 필드: What's new(첫 제출은 비움), Short title, Sort title, Voice title, Additional system requirements.
+      - `## ko-KR`와 `## en-US`: 각각 아래 `###` 절을 같은 순서로 둔다. 붙여 넣을 내용은 절마다 ```` ```text ```` 코드 블록 하나에 넣는다.
+        - `### Product name`: `AppDisplayName`과 같게 `소리섬`, `Soriseom`. 설명 문구를 덧붙이지 마라. 이유: 정책 10.1.1이 이름에 마케팅 문구와 키워드를 금지한다.
+        - `### Short description`: 공백 포함 270자 미만. Description의 첫 문단과 다른 문장으로 쓴다. 이유: Store가 둘을 함께 보여 준다.
+        - `### Description`: 일반 텍스트 10,000자 이하. HTML, 마크다운 기호, 코드, URL을 넣지 마라. 이유: Partner Center 지침이 금지한다. 짧은 문단으로 쓰고, 목록이 필요하면 `•`만 쓴다. 첫 문장에서 가치를 분명히 말한다.
+        - `### Product features`: 한 줄에 하나, 3~10개, 줄마다 200자 이하. 글머리 기호를 넣지 마라. 이유: Store가 붙인다.
+        - `### Keywords`: 한 줄에 하나, 최대 7개, 각 40자 이하, 전체 21단어 이하. 다른 회사의 상표와 "무료", "최고" 같은 일반어를 쓰지 마라. 이유: Partner Center 지침이 피하라고 한다.
+
+      ## 2. 문구에 쓸 사실(docs/PRD.md와 어긋나면 안 된다)
+      - 곡이 바뀌면 제목, 아티스트, 앨범아트를 화면에 몇 초간 보여 주고 사라진다. 앨범아트가 없으면 음표 아이콘을 보여 준다.
+      - 표시 시간 2~10초(기본 4초), 위치 6곳(기본 위쪽 가운데), 크기 70~100%(기본 90%). 주 모니터에 뜬다.
+      - 클릭은 팝업을 지나 뒤의 창으로 전달되고, 포커스를 가져가지 않으며, 작업 표시줄과 Alt+Tab에 나오지 않는다.
+      - 시스템 라이트/다크 테마를 따르는 알약 모양이다.
+      - 앱별 켜기/끄기, 전체화면일 때 숨기기(기본 켜짐), Windows 방해 금지 중에는 표시하지 않음(전체화면 앱을 쓰는 중에는 전체화면 설정만 따른다).
+      - 같은 곡을 반복하면 다시 띄우지 않고, 일시정지 중에 곡 정보만 바뀌면 재생을 시작할 때 띄운다.
+      - 트레이에 상주하고, 로그인 시 자동 실행(기본 켜짐, 끌 수 있음). 설정은 바로 적용된다.
+      - 한국어와 영어 UI, Windows 10 1809 이상과 Windows 11, 무료, 오픈 소스(MIT), 로그인 없음, 네트워크 사용 없음, 데이터 수집 없음.
+
+      Description에 다음 한계를 반드시 적는다. 이유: 정책 10.1.1이 중요한 제한을 설명하라고 한다.
+      - Windows 미디어 세션에 정보를 보내는 앱만 지원한다.
+      - 브라우저는 앱 단위로만 구분하고 사이트별로 구분하지 않는다.
+      - 재생 조작, 진행 바, 앨범명 표시가 없다.
+      - 전용 전체화면(exclusive fullscreen) 게임 위에는 표시되지 않는다.
+
+      금지:
+      - Spotify와 YouTube Music은 Description에 호환 예시로만 쓰고, 그 문단에 해당 회사와 제휴 관계가 없다는 문장을 함께 쓴다. Product name, Short description, Product features, Keywords에는 쓰지 마라. 이유: 정책 10.1.1이 다른 제품과의 관계를 오해하게 하는 것을 금지한다.
+      - "모든 플레이어 지원", "가볍다", "빠르다", "최고"처럼 측정하지 않았거나 사실이 아닌 표현을 쓰지 마라.
+      - Acrylic이나 반투명 효과를 내세우지 마라. 이유: Windows 버전에 따라 단색으로 표시되고 Windows 10에서는 확인하지 못했다.
+      - PRD "범위 밖"의 기능(재생 조작, 전역 단축키, 가사 등)을 있는 것처럼 쓰지 마라.
+
+      ## 3. 기존 문서
+      - `docs/PRD.md` "출시 준비"의 `- [ ] Store 등록 문구 한국어/영어 초안과 개인정보 처리방침(데이터 수집 없음)`을 `- [x]`로 바꾼다. 다른 체크박스는 고치지 마라. 이유: 사용자 몫의 작업이다.
+      - `docs/ARCHITECTURE.md` "디렉토리 구조"의 `docs/` 줄 주석을 `# PRD, ARCHITECTURE, ADR, Store 등록 문구 초안`으로 바꾼다.
+
+      앱 코드, `.resw`, `PRIVACY.md`, `README.md`를 고치지 마라. 이유: 등록 문구는 앱 동작을 바꾸지 않고, 앞의 두 문서는 이전 스텝에서 끝났다.
+    expected_files:
+      - docs/store-listing.md
+      - docs/PRD.md
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'git grep --untracked -q "## ko-KR" -- docs/store-listing.md'
+      - 'git grep --untracked -q "## en-US" -- docs/store-listing.md'
+      - 'git grep --untracked -q "### Keywords" -- docs/store-listing.md'
+      - 'git grep --untracked -q -F -e "https://github.com/LOONACIA/Soriseom/blob/main/PRIVACY.md" -- docs/store-listing.md'
+      - 'git grep --untracked -q -F -e "https://github.com/LOONACIA/Soriseom/issues" -- docs/store-listing.md'
+      - 'git grep --untracked -q -F -e "- [x] Store" -- docs/PRD.md'
+      - 'git grep --untracked -q "Store 등록 문구 초안" -- docs/ARCHITECTURE.md'
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
