@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Numerics;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Soriseom.Core;
 using Windows.Graphics;
@@ -20,12 +23,36 @@ public sealed partial class PopupWindow : Window
     private const int WidthDip = 360;
     private const int HeightDip = 80;
     private const int MarginDip = 16;
+    private const float CollapsedLeftDip = (WidthDip - HeightDip) / 2f;
+    private const float CollapsedRightDip = (WidthDip + HeightDip) / 2f;
+    private const float HiddenScale = 0.4f;
+    private static readonly TimeSpan _appearOpacityDuration = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan _appearScaleDuration = TimeSpan.FromMilliseconds(160);
+    private static readonly TimeSpan _spreadDuration = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan _collapseDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan _disappearOpacityDuration = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan _disappearScaleDuration = TimeSpan.FromMilliseconds(140);
+    private readonly Visual _islandVisual;
+    private readonly Visual _contentVisual;
+    private readonly RectangleClip _clip;
+    private readonly CompositionEasingFunction _easing;
     private bool _isVisible;
+    private bool _isClosing;
+    private long _animationVersion;
     private long _thumbnailVersion;
 
     public unsafe PopupWindow()
     {
         InitializeComponent();
+        ElementCompositionPreview.SetIsTranslationEnabled(ContentRow, true);
+        _islandVisual = ElementCompositionPreview.GetElementVisual(Island);
+        _contentVisual = ElementCompositionPreview.GetElementVisual(ContentRow);
+        var compositor = _islandVisual.Compositor;
+        var radius = new Vector2(HeightDip / 2f);
+        _clip = compositor.CreateRectangleClip(CollapsedLeftDip, 0, CollapsedRightDip, HeightDip, radius, radius, radius, radius);
+        _islandVisual.Clip = _clip;
+        _islandVisual.CenterPoint = new Vector3(WidthDip / 2f, HeightDip / 2f, 0);
+        _easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0), new Vector2(0, 1));
         AlbumArtBrush.ImageFailed += (_, args) =>
         {
             Debug.WriteLine(args.ErrorMessage);
@@ -72,8 +99,22 @@ public sealed partial class PopupWindow : Window
         }
 
         AppWindow.MoveAndResize(new RectInt32(bounds.X, bounds.Y, bounds.Width, bounds.Height));
-        _isVisible = true;
-        AppWindow.Show(false);
+        if (!_isVisible)
+        {
+            _isVisible = true;
+            _clip.Left = CollapsedLeftDip;
+            _clip.Right = CollapsedRightDip;
+            _contentVisual.Properties.InsertVector3("Translation", new Vector3(CollapsedLeftDip, 0, 0));
+            _islandVisual.Opacity = 0;
+            _islandVisual.Scale = new Vector3(HiddenScale, HiddenScale, 1);
+            AppWindow.Show(false);
+            StartOpenAnimation(_appearScaleDuration);
+        }
+        else if (_isClosing)
+        {
+            StartOpenAnimation(TimeSpan.Zero);
+        }
+
         _ = LoadThumbnailAsync(thumbnail);
     }
 
@@ -84,13 +125,62 @@ public sealed partial class PopupWindow : Window
 
     public void HidePopup()
     {
-        if (!_isVisible)
+        if (!_isVisible || _isClosing)
         {
             return;
         }
 
-        AppWindow.Hide();
-        _isVisible = false;
+        _isClosing = true;
+        var version = ++_animationVersion;
+        var batch = _islandVisual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        AnimateScalar(_clip, "Left", CollapsedLeftDip, _collapseDuration, TimeSpan.Zero);
+        AnimateScalar(_clip, "Right", CollapsedRightDip, _collapseDuration, TimeSpan.Zero);
+        AnimateScalar(_contentVisual, "Translation.X", CollapsedLeftDip, _collapseDuration, TimeSpan.Zero);
+        AnimateScalar(_islandVisual, "Opacity", 0, _disappearOpacityDuration, _collapseDuration);
+        AnimateScale(HiddenScale, _disappearScaleDuration, _collapseDuration);
+        batch.End();
+        batch.Completed += (_, _) =>
+        {
+            if (version == _animationVersion)
+            {
+                AppWindow.Hide();
+                _isVisible = false;
+                _isClosing = false;
+            }
+        };
+    }
+
+    private void AnimateScalar(CompositionObject target, string property, float to, TimeSpan duration, TimeSpan delay)
+    {
+        var animation = _islandVisual.Compositor.CreateScalarKeyFrameAnimation();
+        animation.Duration = duration;
+        animation.DelayTime = delay;
+        animation.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+        animation.InsertKeyFrame(1, to, _easing);
+        target.StartAnimation(property, animation);
+    }
+
+    private void AnimateScale(float to, TimeSpan duration, TimeSpan delay)
+    {
+        var animation = _islandVisual.Compositor.CreateVector3KeyFrameAnimation();
+        animation.Duration = duration;
+        animation.DelayTime = delay;
+        animation.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+        animation.InsertKeyFrame(1, new Vector3(to, to, 1), _easing);
+        _islandVisual.StartAnimation("Scale", animation);
+    }
+
+    private void StartOpenAnimation(TimeSpan spreadDelay)
+    {
+        _isClosing = false;
+        _animationVersion++;
+        AnimateScalar(_islandVisual, "Opacity", 1, _appearOpacityDuration, TimeSpan.Zero);
+        AnimateScale(1, _appearScaleDuration, TimeSpan.Zero);
+        AnimateScalar(_clip, "Left", 0, _spreadDuration, spreadDelay);
+        AnimateScalar(_clip, "Right", WidthDip, _spreadDuration, spreadDelay);
+        AnimateScalar(_contentVisual, "Translation.X", 0, _spreadDuration, spreadDelay);
     }
 
     private async Task LoadThumbnailAsync(IRandomAccessStreamReference? thumbnail)
