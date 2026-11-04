@@ -1,0 +1,195 @@
+id: popup-morph-animation
+goal: >
+  팝업의 등장과 퇴장 애니메이션을 바꾼다. 지금은 창 전체가 위에서 미끄러지며 나타나고 페이드로 사라진다. 바뀐 뒤에는 팝업 영역의 가운데에 작은 원(안에 앨범아트나
+  음표)이 나타나 양옆으로 펴지며 제목과 아티스트를 드러내고, 표시 시간이 끝나면 다시 작은 원으로 돌아가 사라진다. 다 펴진 모양은 좌우 끝이 반원인 알약형이고, 앨범아트와
+  음표 배경은 모서리 12 DIP의 둥근 사각형이다. 사라지는 도중에 새 곡이 오면 그 자리에서 다시 펴진다. 클릭 통과, 포커스 유지, 작업 표시줄과 Alt+Tab 제외, 6곳 위치,
+  표시 시간 규칙은 그대로다. 완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 로컬 MSIX 생성이 통과하는 상태다. Acrylic 배경, 창 그림자, 애니메이션
+  관련 설정 항목은 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-transparent-pill-window
+    title: make the popup window transparent and pill-shaped
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "구조 규칙", "주의"), docs/PRD.md("2. 팝업 모양과 동작"), docs/ARCHITECTURE.md("창과 셸 연동 (App)", "구현 전에 확인할 것"),
+      docs/ADR.md(ADR-006, ADR-008, ADR-009), `src/Soriseom.App/PopupWindow.xaml`, `src/Soriseom.App/PopupWindow.xaml.cs`, `src/Soriseom.App/NativeMethods.txt`,
+      `src/Soriseom.App/PopupController.cs`, `tools/smoke/Smoke.ps1`(`Save-Screenshot`, `Save-ElementScreenshot`, `Watch-Popup`).
+
+      목표: 팝업 창의 바탕을 픽셀 단위로 투명하게 만들고 그 안에 알약 모양을 XAML로 그린다. 이 스텝이 끝나면 팝업은 애니메이션 없이 바로 나타나고 바로 사라진다.
+      이유: 지금의 미끄러짐과 페이드는 `SetLayeredWindowAttributes`에 의존하는데, 이 호출이 있으면 창이 투명해지지 않는다. 새 애니메이션은 다음 스텝에서 만든다.
+
+      2026-11-04에 임시 WinUI 창(WindowsAppSDK 2.6.4, Windows 11)에서 조합별로 시험했다. 창 모서리 픽셀이 뒤 배경과 같아지는 조합은 다음 셋을 모두 지킨 경우뿐이었다.
+      (1) 투명 `SystemBackdrop`을 쓴다. (2) `WS_EX_LAYERED`를 켜고 `SetLayeredWindowAttributes`는 부르지 않는다. (3) `DWMWA_WINDOW_CORNER_PREFERENCE`를 `DWMWCP_DONOTROUND`로 둔다.
+      (2)를 어기면 모서리가 어둡게, (3)을 어기면 희게 칠해진다. 이 조합에서 클릭 통과와 포커스 유지도 확인했다. 하나라도 바꾸지 마라.
+
+      ## 1. `src/Soriseom.App/TransparentBackdrop.cs` (새 파일)
+      아래 내용 그대로 만든다. 이 코드는 이 저장소의 분석기와 포맷 검사를 통과하는 것을 확인했다.
+      ```csharp
+      using Microsoft.UI.Composition;
+      using Microsoft.UI.Xaml;
+      using Microsoft.UI.Xaml.Media;
+
+      namespace Soriseom.App;
+
+      /// <summary>
+      /// Leaves only the XAML content on screen. A window with WS_EX_LAYERED and this backdrop composes with per-pixel alpha.
+      /// </summary>
+      internal sealed partial class TransparentBackdrop : SystemBackdrop
+      {
+          private Windows.UI.Composition.Compositor? _compositor;
+
+          protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
+          {
+              base.OnTargetConnected(connectedTarget, xamlRoot);
+              Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().EnsureSystemDispatcherQueue();
+              _compositor ??= new Windows.UI.Composition.Compositor();
+              connectedTarget.SystemBackdrop = _compositor.CreateColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+          }
+
+          protected override void OnDefaultSystemBackdropConfigurationChanged(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
+          {
+              // The brush is transparent in every theme, and the base handler fails for this target when the theme changes.
+          }
+
+          protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop disconnectedTarget)
+          {
+              disconnectedTarget.SystemBackdrop = null;
+              base.OnTargetDisconnected(disconnectedTarget);
+          }
+      }
+      ```
+      `OnDefaultSystemBackdropConfigurationChanged`에서 base를 부르지 마라. 이유: 같은 방식을 쓰는 다른 프로젝트에서 테마 전환 때 base 처리기가 E_INVALIDARG를 던져 앱이 종료됐다.
+
+      ## 2. `src/Soriseom.App/PopupWindow.xaml`
+      - 창 내용을 다음 구조로 바꾼다. `Grid Background="Transparent"`(이름 없음) 안에 `Grid x:Name="Island"`를 두고, 그 안에 `Grid x:Name="ContentRow"`를 둔다.
+      - `Island`: `Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"`, `BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"`, `BorderThickness="1"`, `CornerRadius="40"`.
+        40은 창 높이 80 DIP의 절반이다.
+      - `ContentRow`: `Padding="11,11,19,11"`, `ColumnSpacing="12"`. 지금 루트 `Grid`의 `ColumnDefinitions`와 자식(앨범아트 영역, 제목과 아티스트 `StackPanel`)을 그대로 옮긴다. 왼쪽, 위, 아래 11은 테두리 1과 합쳐
+        지금 여백 12와 같고, 오른쪽 19는 긴 제목이 끝의 곡선에 닿지 않게 한다.
+      - `NoteArt`와 `AlbumArt`의 `CornerRadius`를 `{ThemeResource ControlCornerRadius}`에서 `12`로 바꾼다. 다른 속성과 `x:Name`은 그대로 둔다. 이유: `tools/smoke/Smoke.ps1`이 `TitleText`로 창을 찾는다.
+
+      ## 3. `src/Soriseom.App/PopupWindow.xaml.cs`
+      - 생성자: `SetLayeredWindowAttributes` 호출을 지운다. `preference`를 `DWM_WINDOW_CORNER_PREFERENCE.DWMWCP_DONOTROUND`로 바꾼다. `DwmSetWindowAttribute` 호출 다음 줄에
+        `SystemBackdrop = new TransparentBackdrop();`를 넣는다. 확장 스타일 네 개(`WS_EX_LAYERED`, `WS_EX_TRANSPARENT`, `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`)는 그대로 둔다. 이유: 레이어드와 투명을
+        함께 써야 클릭이 다른 프로세스의 창으로 통과한다.
+      - 지금 애니메이션을 지운다: `_animationTimer`, `_animationStopwatch`, `_finalPosition`, `_slideOffset`, `_isFadingOut`, `Animate()`, `SetAlpha()`, 생성자의 타이머 설정과 `Closed` 처리기. 그 때문에 쓰지 않게 된
+        using도 지운다. `Debug.WriteLine`을 쓰는 `System.Diagnostics`는 남는다.
+      - `ShowTrack`: 곡 정보와 썸네일 처리, DPI 계산, `PopupPlacement.Compute`는 그대로 둔다. 숨겨진 상태면 지금처럼 먼저 `AppWindow.Move(new PointInt32(workArea.X, workArea.Y))`를 한 뒤 `AppWindow.MoveAndResize`를 부른다.
+        이유: 창을 주 모니터로 먼저 옮겨야 그 모니터의 DPI로 크기가 잡힌다. 그다음 `_isVisible = true; AppWindow.Show(false);`로 바로 보여준다.
+      - `HidePopup`: 숨겨진 상태면 아무것도 하지 않고, 아니면 `AppWindow.Hide(); _isVisible = false;`만 한다.
+      공개 메서드 `ShowTrack`, `UpdateThumbnail`, `HidePopup`의 시그니처를 바꾸지 마라. 이유: `PopupController`가 그대로 부른다.
+
+      ## 4. `src/Soriseom.App/NativeMethods.txt`
+      `SetLayeredWindowAttributes` 줄만 지운다. 다른 곳에서 쓰지 않는다. 다른 줄은 고치지 마라.
+
+      ## 5. `tools/smoke/Smoke.ps1`
+      `Watch-Popup`의 `Save-Screenshot $popup $ScreenshotName`을 `Save-ElementScreenshot $popup $ScreenshotName`으로 바꾼다. 이유: 시험에서 `PrintWindow`는 투명 창을 빈 흰 이미지로 찍었고 화면 복사는 실제 모양을 찍었다.
+      `Save-ElementScreenshot` 위의 주석을 영어로 고친다: 트레이 아이콘은 창이 없고 `PrintWindow`는 투명한 팝업을 빈 이미지로 찍으므로 화면에서 복사한다는 내용. 다른 시나리오와 판정은 고치지 마라.
+      이 파일은 파일 편집 도구로만 고치고 실행하지 마라. 이유: `.codex/hooks/guard.py`가 `tools/smoke/` 경로가 들어간 셸 명령을 막고, 스모크는 계획 마무리 때 Claude가 돌린다.
+
+      ## 6. 문서
+      - docs/ARCHITECTURE.md "창과 셸 연동 (App)"의 **팝업 창** 항목 끝에 다음 내용을 더한다: 창 바탕은 `TransparentBackdrop`으로 투명하게 두고 보이는 모양은 XAML로 그린다. `SetLayeredWindowAttributes`를 부르거나
+        DWM 둥근 모서리를 켜면 바탕이 불투명해진다.
+      - docs/ARCHITECTURE.md "구현 전에 확인할 것" 목록 끝에 추가한다: `- [ ] Windows 10에서 팝업 바깥이 투명하게 보이는지: 2026-11-04에 Windows 11에서만 확인했습니다. SetLayeredWindowAttributes 없는 레이어드 창은 Windows 10에서 보이지 않을 수 있습니다.`
+      - docs/ADR.md ADR-009 "스크립트가 못 보는 항목"의 "작업 표시줄 테마 전환" 항목 끝에 문장을 더한다: "이때 앱이 종료되지 않는지, 팝업 색이 Windows 모드를 따르는지도 확인합니다."
+      docs/PRD.md는 고치지 마라. 이유: 애니메이션 문구는 다음 스텝에서 함께 고친다.
+
+      ## 하지 말 것
+      - 새 애니메이션, Composition 호출, `Storyboard`를 넣지 마라. 이유: 다음 스텝의 범위다.
+      - `SetWindowRgn`, `UpdateLayeredWindow`, `DwmEnableBlurBehindWindow`, `DwmExtendFrameIntoClientArea`, 창 서브클래싱을 쓰지 마라. 이유: 시험에서 필요하지 않았고, 창 영역은 가장자리가 계단처럼 보인다.
+      - Acrylic(`DesktopAcrylicBackdrop`, `SystemBackdropElement`, `AcrylicBrush`)과 그림자를 넣지 마라. 이유: 이 계획 밖이다.
+      - `PopupController`, Core, 테스트, `SettingsWindow`를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.App/TransparentBackdrop.cs
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - src/Soriseom.App/NativeMethods.txt
+      - tools/smoke/Smoke.ps1
+      - docs/ARCHITECTURE.md
+      - docs/ADR.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-circle-pill-animation
+    title: morph the popup between a small circle and a pill
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: docs/PRD.md("1. 곡 변경 팝업", "2. 팝업 모양과 동작"), docs/ADR.md(ADR-006, ADR-009), `src/Soriseom.App/PopupWindow.xaml`, `src/Soriseom.App/PopupWindow.xaml.cs`,
+      `src/Soriseom.App/TransparentBackdrop.cs`(이전 스텝), `src/Soriseom.App/PopupController.cs`.
+      이전 스텝이 창을 투명하게 만들고 `Island`(알약 배경), `ContentRow`(앨범아트와 글자)를 만들었다.
+
+      목표: 팝업이 작은 원으로 나타나 양옆으로 펴지고, 숨을 때 다시 작은 원으로 돌아가 사라진다. 창 자체는 최종 위치와 크기에 고정하고 안의 Composition 값만 움직인다. 아래 흐름과 수치는
+      2026-11-04에 임시 창에서 프레임 캡처와 로그로 확인했다(중간 끊김 포함). 수치를 임의로 바꾸지 마라.
+
+      ## 동작 (시간은 ms)
+      작은 원은 `Island`를 가운데 80 DIP 폭으로 잘라 만든다. `ContentRow`를 같은 거리만큼 오른쪽으로 옮기면 앨범아트가 원 가운데에 오고, 펴지는 동안 아트가 왼쪽 끝을 따라가며 글자는 오른쪽으로 드러난다.
+      6곳 위치 모두 창의 가운데에서 펴진다.
+      - 나타남: `Island` Opacity 0 → 1(120), Scale 0.4 → 1(160).
+      - 펴짐: 나타남 시작 160 뒤부터 300 동안 clip Left 140 → 0, clip Right 220 → 360, `ContentRow` Translation.X 140 → 0.
+      - 접힘: 250 동안 clip Left 0 → 140, clip Right 360 → 220, Translation.X 0 → 140.
+      - 사라짐: 접힘 시작 250 뒤부터 Opacity → 0(120), Scale → 0.4(140). 모두 끝나면 `AppWindow.Hide()`.
+      이징은 전부 cubic bezier `(0.2, 0), (0, 1)`이다.
+
+      상태별 처리:
+      - 숨겨진 상태에서 `ShowTrack`: 초기값을 넣고 창을 보인 뒤 나타남과 펴짐을 시작한다.
+      - 표시 중이거나 펴지는 중에 `ShowTrack`: 내용만 바꾼다. 애니메이션을 다시 시작하지 마라. 이유: PRD 1, 표시 중 교체는 내용만 바꾼다.
+      - 접히거나 사라지는 중에 `ShowTrack`: 지연 없이 지금 값에서 다시 펴진다.
+      - 이미 접히는 중이거나 숨겨진 상태에서 `HidePopup`: 아무것도 하지 않는다.
+
+      ## `src/Soriseom.App/PopupWindow.xaml.cs`
+      - 상수: `private const float CollapsedLeftDip = (WidthDip - HeightDip) / 2f;`, `CollapsedRightDip = (WidthDip + HeightDip) / 2f;`, `HiddenScale = 0.4f`. 시간 값은 `private static readonly TimeSpan`으로 이름을 붙인다.
+      - 필드: `Visual _islandVisual`, `Visual _contentVisual`, `RectangleClip _clip`, `CompositionEasingFunction _easing`, `bool _isClosing`, `long _animationVersion`.
+      - 생성자의 `InitializeComponent()` 뒤:
+        ```csharp
+        ElementCompositionPreview.SetIsTranslationEnabled(ContentRow, true);
+        _islandVisual = ElementCompositionPreview.GetElementVisual(Island);
+        _contentVisual = ElementCompositionPreview.GetElementVisual(ContentRow);
+        var compositor = _islandVisual.Compositor;
+        var radius = new Vector2(HeightDip / 2f);
+        _clip = compositor.CreateRectangleClip(CollapsedLeftDip, 0, CollapsedRightDip, HeightDip, radius, radius, radius, radius);
+        _islandVisual.Clip = _clip;
+        _islandVisual.CenterPoint = new Vector3(WidthDip / 2f, HeightDip / 2f, 0);
+        _easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0), new Vector2(0, 1));
+        ```
+      - `private void AnimateScalar(CompositionObject target, string property, float to, TimeSpan duration, TimeSpan delay)`: `CreateScalarKeyFrameAnimation`에 `Duration`, `DelayTime`,
+        `DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay`를 넣고 `InsertExpressionKeyFrame(0, "this.StartingValue")`, `InsertKeyFrame(1, to, _easing)` 후 `target.StartAnimation(property, animation)`.
+        `this.StartingValue`를 빼지 마라. 이유: 끊긴 애니메이션이 지금 값에서 이어지게 한다.
+      - `private void AnimateScale(float to, TimeSpan duration, TimeSpan delay)`: 같은 방식으로 `CreateVector3KeyFrameAnimation`, 값은 `new Vector3(to, to, 1)`, 대상은 `_islandVisual`의 `"Scale"`.
+      - `private void StartOpenAnimation(TimeSpan spreadDelay)`: `_isClosing = false; _animationVersion++;` 후 Opacity와 Scale은 지연 0으로, `_clip`의 `"Left"`(→ 0), `"Right"`(→ `WidthDip`), `_contentVisual`의 `"Translation.X"`(→ 0)는
+        `spreadDelay`로 시작한다.
+      - `ShowTrack`: `MoveAndResize` 뒤에 분기한다.
+        - `!_isVisible`이면 `_isVisible = true;` 후 `_clip.Left = CollapsedLeftDip; _clip.Right = CollapsedRightDip; _contentVisual.Properties.InsertVector3("Translation", new Vector3(CollapsedLeftDip, 0, 0)); _islandVisual.Opacity = 0; _islandVisual.Scale = new Vector3(HiddenScale, HiddenScale, 1);`,
+          `AppWindow.Show(false);`, `StartOpenAnimation(나타남 Scale 시간 160)`.
+        - 그렇지 않고 `_isClosing`이면 `StartOpenAnimation(TimeSpan.Zero)`.
+      - `HidePopup`: `!_isVisible || _isClosing`이면 돌아간다. `_isClosing = true; var version = ++_animationVersion;` 후 `_islandVisual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation)`을 만들고, 접힘과 사라짐 애니메이션을 시작하고,
+        `batch.End()` 뒤 `batch.Completed`에서 `version == _animationVersion`일 때만 `AppWindow.Hide(); _isVisible = false; _isClosing = false;`를 한다. 이유: 끊긴 애니메이션의 배치도 Completed를 올리는데(시험 로그로 확인), 이때 창을 숨기면 안 된다.
+        `batch`의 Completed는 UI 스레드에서 오므로 `DispatcherQueue`로 넘기지 마라.
+      - 필요한 using을 더한다: `System.Numerics`, `Microsoft.UI.Composition`, `Microsoft.UI.Xaml.Hosting`.
+
+      `src/Soriseom.App/PopupWindow.xaml`은 고치지 마라. 이전 스텝의 구조를 그대로 쓴다.
+
+      ## docs/PRD.md
+      "2. 팝업 모양과 동작"의 "Windows 11 스타일입니다." 줄을 다음으로 바꾼다. 다른 줄은 고치지 마라.
+      `- Windows 11 스타일입니다. Acrylic 반투명 배경에 알약 모양을 쓰고 시스템 라이트/다크 테마를 따릅니다. 앨범아트가 든 작은 원으로 나타나 양옆으로 펴지며 내용을 보여주고, 다시 작은 원으로 돌아가 사라집니다.`
+
+      ## 하지 말 것
+      - `DispatcherQueueTimer`, `Storyboard`, `Task.Delay`로 애니메이션을 돌리지 마라. 이유: Composition 애니메이션은 UI 스레드와 무관하게 화면 주사율에 맞춰 돈다.
+      - 창을 프레임마다 옮기거나 크기를 바꾸지 마라. 이유: 창은 고정이어야 스모크의 위치 검사와 클릭 통과 영역이 그대로이고, 매 프레임 레이아웃이 다시 돌지 않는다.
+      - 애니메이션 시간, 끄기 옵션 같은 설정을 추가하지 마라. 이유: docs/PRD.md에 없는 설정이다. `UISettings.AnimationsEnabled` 분기도 넣지 마라.
+      - 판단 로직을 Core로 옮기지 마라. 이유: 화면 효과일 뿐 곡 표시 규칙이 아니다.
+      - `PopupController`, `TransparentBackdrop`, Core, 테스트, `tools/smoke/`를 고치지 마라. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - docs/PRD.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
