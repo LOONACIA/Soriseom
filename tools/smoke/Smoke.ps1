@@ -551,6 +551,32 @@ function Test-PopupBounds($Bounds, [int] $SizePercent) {
     Check "the $SizePercent% popup is that share of 360x80 DIP" ([Math]::Abs($Bounds.Right - $Bounds.Left - 360 * $sizeScale) -le 2 -and [Math]::Abs($Bounds.Bottom - $Bounds.Top - 80 * $sizeScale) -le 2) $edges
 }
 
+# How far a pixel is from the red half of the backdrop band.
+function Get-RedBandDistance($Pixel) {
+    return [Math]::Max(255 - $Pixel.R, [Math]::Max($Pixel.G, $Pixel.B))
+}
+
+# The share of rows on the left curve of the pill where the step from the band takes more than one pixel.
+# The acrylic's own rounded edge is a hard stair step, so without the rim over it this is zero.
+function Get-PopupEdgeSoftness($Bitmap) {
+    $rows = 0
+    $softRows = 0
+    for ($y = [int]($Bitmap.Height * 0.1); $y -lt [int]($Bitmap.Height * 0.9); $y++) {
+        for ($x = 0; $x -lt [int]($Bitmap.Width / 4); $x++) {
+            $distance = Get-RedBandDistance $Bitmap.GetPixel($x, $y)
+            if ($distance -lt 16) { continue }
+
+            $settled = [Math]::Max((Get-RedBandDistance $Bitmap.GetPixel(($x + 1), $y)), (Get-RedBandDistance $Bitmap.GetPixel(($x + 2), $y)))
+            $rows++
+            if ($distance / $settled -lt 0.75) { $softRows++ }
+            break
+        }
+    }
+
+    if ($rows -eq 0) { return 0 }
+    return $softRows / $rows
+}
+
 # Acrylic lets the two colors of the band through, and a solid background looks the same on both sides.
 function Test-PopupAcrylic([string] $ScreenshotName) {
     $path = Join-Path $OutDir "$ScreenshotName.png"
@@ -576,6 +602,8 @@ function Test-PopupAcrylic([string] $ScreenshotName) {
         $right = $bitmap.GetPixel([int]($bitmap.Width * 0.75), $row)
         $difference = ([Math]::Abs($left.R - $right.R), [Math]::Abs($left.G - $right.G), [Math]::Abs($left.B - $right.B) | Measure-Object -Maximum).Maximum
         Check 'the popup lets what is behind it show through' ($difference -ge 16) "left ($($left.R),$($left.G),$($left.B)), right ($($right.R),$($right.G),$($right.B)); transparency effects or battery saver can also turn acrylic off"
+        $softness = Get-PopupEdgeSoftness $bitmap
+        Check 'the popup edge is anti-aliased' ($softness -ge 0.3) ('{0:P0} of the rows on its curve are partly covered' -f $softness)
     } finally {
         $bitmap.Dispose()
     }
