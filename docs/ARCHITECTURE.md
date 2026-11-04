@@ -54,7 +54,7 @@ App: 팝업 창
 
 ## 창과 셸 연동 (App)
 
-- **팝업 창**: 테두리 없음, 항상 위, 활성화하지 않음(포커스 유지), 작업 표시줄과 Alt+Tab에서 제외, 클릭 통과, Acrylic 배경. 위치는 주 모니터 작업 영역 기준 6곳이고 DPI 배율을 반영합니다.
+- **팝업 창**: 테두리 없음, 항상 위, 활성화하지 않음(포커스 유지), 작업 표시줄과 Alt+Tab에서 제외, 클릭 통과, Acrylic 배경. 위치는 주 모니터 작업 영역 기준 6곳이고 DPI 배율을 반영합니다. 창 바탕은 `TransparentBackdrop`으로 투명하게 두고 보이는 모양은 XAML로 그립니다. `SetLayeredWindowAttributes`를 부르거나 DWM 둥근 모서리를 켜면 바탕이 불투명해집니다.
 - **트레이**: H.NotifyIcon.WinUI. 왼쪽 클릭은 설정 창, 오른쪽 클릭은 메뉴(설정, 종료)입니다. 아이콘은 작업 표시줄 테마(`SystemUsesLightTheme`)를 따르며 앱 테마와 다를 수 있습니다. 실행 중 변경은 `UISettings.ColorValuesChanged`로 감지합니다.
 - **단일 인스턴스**: Windows App SDK의 `AppInstance`로 두 번째 실행을 기존 인스턴스로 넘기고, 기존 인스턴스는 설정 창을 엽니다.
 - **자동 실행**: MSIX `StartupTask`를 매니페스트에서 `Enabled="true"`로 선언해 기본으로 켜고, 설정에서 끄고 켭니다. 상태의 원본은 `StartupTask.State`이며 LocalSettings에 저장하지 않습니다. 시작 방식은 `AppInstance.GetActivatedEventArgs().Kind`로 구분해 자동 실행이면 창을 열지 않습니다.
@@ -80,4 +80,5 @@ App: 팝업 창
 - [ ] Windows 방해 금지 모드를 감지할 공식 API가 있는지. 없으면 이 기능은 빼고 PRD를 고칩니다.
 - [x] 언어 변경이 재시작 없이 반영되는지: `PrimaryLanguageOverride`는 이미 불러온 UI에 바로 반영된다는 보장이 없고 `x:Uid` 문자열도 갱신되지 않으므로, 재시작을 안내합니다.
 - [ ] Store 자동 제출 방식(msstore CLI와 Entra ID 앱 연동), 최초 제출을 수동으로 해야 하는지
+- [ ] Windows 10에서 팝업 바깥이 투명하게 보이는지: 2026-11-04에 Windows 11에서만 확인했습니다. SetLayeredWindowAttributes 없는 레이어드 창은 Windows 10에서 보이지 않을 수 있습니다.
 

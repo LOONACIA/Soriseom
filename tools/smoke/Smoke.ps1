@@ -314,7 +314,7 @@ function Save-Screenshot($Window, [string] $Name) {
     Write-Line "screenshot $path"
 }
 
-# A tray icon has no window of its own, so its rectangle is copied from the screen.
+# Tray icons have no window, and PrintWindow captures transparent popups as blank images, so copy from the screen.
 function Save-ElementScreenshot($Element, [string] $Name) {
     $bounds = $Element.Current.BoundingRectangle
     $bitmap = [System.Drawing.Bitmap]::new([int]$bounds.Width, [int]$bounds.Height)
@@ -451,7 +451,7 @@ function Watch-Popup([string] $Title, [string] $ScreenshotName) {
         if (-not $screenshotTaken -and $watch.Elapsed.TotalSeconds - $shownAt -gt 1) {
             $current = try { (Find-Id $popup 'TitleText').Current.Name } catch { $null }
             if ($current -eq $Title) {
-                Save-Screenshot $popup $ScreenshotName
+                Save-ElementScreenshot $popup $ScreenshotName
                 $screenshotTaken = $true
             }
         }
