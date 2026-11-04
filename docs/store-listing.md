@@ -7,7 +7,19 @@
 - [ ] Windows 10 실제 동작을 확인합니다. 매니페스트 최소 버전이 10.0.17763이라 Store가 Windows 10에도 제공하지만, 팝업 투명 처리와 Acrylic은 Windows 11에서만 확인했습니다([ARCHITECTURE.md의 구현 전에 확인할 것](ARCHITECTURE.md#구현-전에-확인할-것)).
 - [ ] Description에 적은 Spotify와 YouTube Music을 실제 앱에서 확인합니다. 확인하지 못한 이름은 두 언어의 Description에서 뺍니다.
 - [ ] 앨범아트 로드, 트레이 오른쪽 클릭 메뉴와 종료, Windows 모드 전환을 사람이 확인합니다([ADR-010](ADR.md#adr-010-release는-트리밍을-유지하고-il2104만-오류에서-뺀다)).
-- [ ] `PRIVACY.md`가 `main`에 머지되어 아래 Privacy policy URL이 열리는지 확인합니다.
+- [x] `PRIVACY.md`가 `main`에 머지되어 아래 Privacy policy URL이 열리는지 확인합니다.
+- [ ] 업로드할 패키지로 Windows App Certification Kit을 돌립니다. 이 PC의 빌드와 Store 인증 결과가 다를 수 있습니다.
+
+## 최초 제출 순서
+
+1. Partner Center의 앱 ID 페이지에서 Package/Identity/Name, Package/Identity/Publisher, Package/Properties/PublisherDisplayName 값을 확인해 GitHub Secrets에 넣습니다.
+   `gh secret set PACKAGE_IDENTITY_NAME`, `gh secret set PACKAGE_PUBLISHER`, `gh secret set PACKAGE_PUBLISHER_DISPLAY_NAME`
+2. 패키지를 만듭니다. `gh workflow run store-release.yml -f version=1.0.0`
+3. 실행이 끝나면 패키지를 내려받습니다. `gh run download <실행 ID> -n store-package`
+4. Partner Center의 Packages 페이지에 `.msixupload`를 올립니다. 기기군 선택이 나오면 Windows 10/11 Desktop만 남깁니다.
+5. Store listings, Properties, Age ratings, Submission options를 이 문서대로 채우고 언어별 스크린샷을 올립니다.
+6. 제출합니다. 인증을 통과해 게시되기 전까지는 태그를 push하지 않습니다. 자동 제출은 이미 게시된 앱에만 쓸 수 있어 제출 단계에서 실패합니다.
+7. 게시된 뒤부터는 최초 제출보다 높은 버전으로 `git tag vX.Y.Z`, `git push origin vX.Y.Z`를 실행합니다(ADR-007). 첫 태그 제출이 Secrets 인증을 처음 시험하는 때이므로 결과를 확인합니다.
 
 ## 공통 입력값
 
@@ -31,6 +43,44 @@
 아래 코드 블록 안의 내용만 해당 필드에 붙여 넣습니다. Product name은 해당 언어로 예약한 이름을 선택하며, 리소스의 `AppDisplayName`과 맞춥니다. Short description은 Description과 함께 표시되므로 첫 문단과 다른 문장으로 작성하고 공백 포함 270자 미만으로 유지합니다. Description은 일반 텍스트 10,000자 이하로 작성하며 HTML, 마크다운 기호, 코드, URL을 넣지 않습니다. Product features는 이 초안에서 3~10개로 구성하고 줄마다 200자 이하로 작성하며, Store가 글머리 기호를 붙이므로 직접 넣지 않습니다. [등록 문구 안내](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/add-and-edit-store-listing-info)를 참고합니다.
 
 Keywords는 줄마다 하나씩 입력합니다. 최대 7개, 각 40자 이하, 전체 21단어 이하로 유지하고 다른 회사의 상표나 일반적인 홍보 단어를 넣지 않습니다. [키워드 안내](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/add-additional-information)를 참고합니다.
+
+## Submission options
+
+`runFullTrust` 사유(Why do you need the runFullTrust capability?):
+
+```text
+Soriseom is a WinUI 3 desktop app built with the Windows App SDK. Packaged desktop apps run as full-trust processes, and this app model requires the capability. The app runs in the system tray after its settings window closes, starts at sign-in unless the user turns that off in its settings, and shows a click-through popup that does not take focus. It does not use the network or collect data.
+```
+
+Notes for certification:
+
+```text
+No account or sign-in is required. The app shows a popup only when the track in the current Windows media session changes, so a track that is already playing when the app starts shows no popup.
+To test: 1. Start the app. Its settings window opens on the first launch, and the app stays in the system tray after you close it. 2. Play music in an app that shares track information with Windows media sessions, such as Media Player or a music website in Microsoft Edge. 3. Skip to another track. The popup shows the title, artist, and album art for about 4 seconds at the top center of the primary display. It stays hidden while a fullscreen app is in use or Do Not Disturb is on.
+The app starts at sign-in by default, and this can be turned off in its settings. It does not play audio or use the network.
+```
+
+## 연령 등급 설문
+
+IARC 설문은 첫 질문에서 고른 앱 분류에 따라 문항이 달라지고 바뀔 수 있으므로, 화면의 문항을 보고 사람이 아래 사실에 맞게 답합니다. 첫 질문에서는 게임이 아닌 앱 분류 중 유틸리티에 가장 가까운 항목을 고릅니다.
+
+| 항목 | 사실 |
+|---|---|
+| 앱이 직접 제공하는 콘텐츠 | 폭력, 성적 내용, 욕설, 약물, 도박이 없습니다. |
+| 표시하는 외부 콘텐츠 | 사용자가 재생 중인 곡의 제목, 아티스트, 앨범아트를 받은 그대로 잠깐 표시합니다. 앱이 곡을 제공하거나 고르지 않습니다. |
+| 사용자 간 상호작용 | 없습니다. 채팅, 공유, 사용자 생성 콘텐츠 업로드 기능이 없습니다. |
+| 위치와 개인정보 공유 | 없습니다. 네트워크를 쓰지 않고 곡 정보를 PC 밖으로 보내지 않습니다. |
+| 구매와 광고 | 없습니다. 무료이고 앱 내 구매와 광고가 없습니다. |
+| 웹 접근 | 없습니다. 앱 안에 브라우저나 외부 링크 탐색 기능이 없습니다. |
+
+## 스크린샷
+
+언어마다 PNG 두 장을 올립니다. Claude가 `tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots`로 만들고, 다른 창이나 개인 정보가 없는지 확인합니다(ADR-009). 파일과 캡션은 다음과 같습니다.
+
+| 파일 | ko-KR 캡션 | en-US 캡션 |
+|---|---|---|
+| `store-<언어>-popup.png` | 곡이 바뀌면 제목, 아티스트, 앨범아트를 잠깐 표시합니다. | Briefly shows the title, artist, and album art when the track changes. |
+| `store-<언어>-settings.png` | 표시 시간, 위치, 크기와 앱별 표시 여부를 설정합니다. | Choose the display time, position, size, and which apps can show popups. |
 
 ## ko-KR
 

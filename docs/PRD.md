@@ -90,13 +90,16 @@
 
 사용자:
 
-- [ ] Partner Center에서 앱 이름 'Soriseom'과 '소리섬' 예약
+- [x] Partner Center에서 앱 이름 'Soriseom'과 '소리섬' 예약
+- [ ] 패키지 식별 정보 3개를 GitHub Secrets에 등록([최초 제출 순서](store-listing.md#최초-제출-순서))
 - [ ] Store 최초 제출을 Partner Center에서 직접 진행
-- [ ] 자동 제출용 Entra ID 앱을 만들고 자격 증명을 GitHub Secrets에 등록
-- [ ] Store 스크린샷 캡처
+- [ ] 자동 제출용 Entra ID 앱을 만들고 자격 증명을 GitHub Secrets에 등록(Secrets 5개는 등록돼 있고, 첫 태그 제출 때 실제 인증을 확인)
+- [ ] Store 스크린샷 업로드
 
 Claude:
 
-- [ ] GitHub 공개 저장소 `LOONACIA/Soriseom` 생성(만들기 전에 사용자 확인)
+- [x] GitHub 공개 저장소 `LOONACIA/Soriseom` 생성
 - [x] 앱 아이콘 초안: 섬과 음표 모티브의 SVG, Store 로고 크기별 PNG, 트레이용 라이트/다크
 - [x] Store 등록 문구 한국어/영어 초안과 개인정보 처리방침(데이터 수집 없음)
+- [x] 태그 제출 워크플로와 Store 업로드 패키지 스크립트
+- [ ] Store 스크린샷 생성(`storeshots` 시나리오)
