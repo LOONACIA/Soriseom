@@ -20,7 +20,8 @@ tests/
 └── Soriseom.Core.Tests/    # xUnit v3. Core만 테스트
 tools/
 ├── icons/                  # 앱·트레이 아이콘 SVG 원본과 에셋 생성 스크립트(uv로 실행, 앱에 포함되지 않음)
-└── smoke/                  # 앱을 실행해 UI Automation으로 확인하는 스크립트(ADR-009)
+├── smoke/                  # 앱을 실행해 UI Automation으로 확인하는 스크립트(ADR-009)
+└── store/                  # Store 업로드 패키지를 만드는 스크립트(패키지 식별 정보와 버전은 빌드할 때만 넣음)
 .github/workflows/          # CI: 빌드·테스트·포맷, 태그 시 Store 제출
 docs/                       # PRD, ARCHITECTURE, ADR, Store 등록 문구 초안
 ```
