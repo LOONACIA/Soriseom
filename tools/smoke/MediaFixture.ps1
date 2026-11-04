@@ -10,7 +10,8 @@ param(
     [string] $SecondTitle,
     [string] $Artist,
     [string] $StatusPath,
-    [int] $HoldSeconds = 8
+    [int] $HoldSeconds = 8,
+    [string] $ThumbnailPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,6 +68,15 @@ $controls.IsPlayEnabled = $true
 $controls.IsPauseEnabled = $true
 $player.Play()
 $controls.PlaybackStatus = [Windows.Media.MediaPlaybackStatus]::Playing
+
+if ($ThumbnailPath) {
+    $fileType = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+    [void][Windows.Storage.Streams.RandomAccessStreamReference, Windows.Storage.Streams, ContentType = WindowsRuntime]
+    $fileTask = $asTask.MakeGenericMethod($fileType).Invoke($null, @($fileType::GetFileFromPathAsync($ThumbnailPath)))
+    $fileTask.Wait()
+    $file = $fileTask.Result
+    $controls.DisplayUpdater.Thumbnail = [Windows.Storage.Streams.RandomAccessStreamReference]::CreateFromFile($file)
+}
 
 foreach ($title in $FirstTitle, $SecondTitle) {
     $controls.DisplayUpdater.Type = [Windows.Media.MediaPlaybackType]::Music

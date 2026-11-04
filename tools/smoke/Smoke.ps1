@@ -16,7 +16,8 @@
     (locked, full-screen, do not disturb, or other media playback holds the current session), which says nothing about the code.
 
 .PARAMETER Scenario
-    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, dnd, tray.
+    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, dnd, tray, storeshots.
+    storeshots generates Store screenshots and is not included in the default list.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Debug; Release is the trimmed build users receive.
@@ -52,6 +53,7 @@ public static class SmokeNative {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -419,6 +421,26 @@ function Save-ElementScreenshot($Element, [string] $Name) {
     Write-Line "screenshot $path"
 }
 
+# PrintWindow cannot capture a transparent popup together with its backdrop.
+function Save-WorkAreaScreenshot([string] $Name) {
+    $workArea = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+    $width = $workArea.Right - $workArea.Left
+    $height = $workArea.Bottom - $workArea.Top
+    $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $path = Join-Path $OutDir "$Name.png"
+    try {
+        $graphics.CopyFromScreen($workArea.Left, $workArea.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+    Write-Line "screenshot $path"
+    Check "$Name is between 1366x768 and 3840x2160 pixels" ($width -ge 1366 -and $height -ge 768 -and $width -le 3840 -and $height -le 2160) "${width}x${height}"
+}
+
 function Test-Launch {
     Stop-App
     Start-AppActivation
@@ -569,12 +591,24 @@ function Start-BackdropFixture {
     $width = [int](480 * $dpiScale)
     $height = [int](112 * $dpiScale)
     $x = [int](($workArea.Left + $workArea.Right - $width) / 2)
+    return Start-BackdropProcess $x $workArea.Top $width $height
+}
+
+function Start-StoreBackdrop {
+    $workArea = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+    return Start-BackdropProcess $workArea.Left $workArea.Top ($workArea.Right - $workArea.Left) ($workArea.Bottom - $workArea.Top) -Neutral
+}
+
+function Start-BackdropProcess([int] $X, [int] $Y, [int] $Width, [int] $Height, [switch] $Neutral) {
     $readyPath = Join-Path $OutDir 'backdrop-fixture.txt'
     Remove-Item $readyPath -Force -ErrorAction SilentlyContinue
     $fixturePath = Join-Path $PSScriptRoot 'BackdropFixture.ps1'
-    $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+    $arguments = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
-        '-X', $x, '-Y', $workArea.Top, '-Width', $width, '-Height', $height, '-ReadyPath', "`"$readyPath`"")
+        '-X', $X, '-Y', $Y, '-Width', $Width, '-Height', $Height, '-ReadyPath', "`"$readyPath`"")
+    if ($Neutral) { $arguments += '-Neutral' }
+    $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList $arguments
     if (-not (Wait-For { Test-Path $readyPath })) {
         Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue
         throw 'the backdrop fixture did not start'
@@ -733,6 +767,106 @@ function Test-Media {
     }
 }
 
+function Save-StoreScreenshots {
+    if (Test-DoNotDisturbOn) {
+        $script:UnavailableReason = 'do not disturb is on, and the app hides popups then by design; turn it off and run again'
+        Write-Line "SKIP storeshots: $script:UnavailableReason"
+        return
+    }
+
+    $albumPath = Join-Path $OutDir 'store-album-art.png'
+    try {
+        # Original artwork without another company's album art or trademarks.
+        $bitmap = [System.Drawing.Bitmap]::new(512, 512)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $brush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+            [System.Drawing.Rectangle]::new(0, 0, 512, 512),
+            [System.Drawing.ColorTranslator]::FromHtml('#76C7C0'),
+            [System.Drawing.ColorTranslator]::FromHtml('#274B6D'),
+            [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
+        try {
+            $graphics.FillRectangle($brush, 0, 0, 512, 512)
+            $bitmap.Save($albumPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        } finally {
+            $brush.Dispose()
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+
+        $languages = @(
+            @{ Culture = 'ko-KR'; FirstTitle = '파도 소리'; SecondTitle = '섬의 아침'; Artist = '소리섬 데모' },
+            @{ Culture = 'en-US'; FirstTitle = 'Ocean Waves'; SecondTitle = 'Island Morning'; Artist = 'Soriseom Demo' })
+        foreach ($language in $languages) {
+            $culture = $language.Culture
+            $fixture = $null
+            $backdrop = $null
+            $statusPath = Join-Path $OutDir "store-$culture-fixture.txt"
+            try {
+                Stop-App
+                [void](Invoke-LanguageOverride $culture)
+                Open-Settings
+                $backdrop = Start-StoreBackdrop
+                # Tracks already playing when media watching starts get no popup.
+                Start-Sleep -Seconds 2
+                $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
+                $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
+                    '-AppId', $FixtureAppId, '-FirstTitle', "`"$($language.FirstTitle)`"", '-SecondTitle', "`"$($language.SecondTitle)`"",
+                    '-Artist', "`"$($language.Artist)`"", '-ThumbnailPath', "`"$albumPath`"", '-StatusPath', "`"$statusPath`"")
+                $popup = Wait-For {
+                    $candidate = Get-PopupWindow
+                    if ($candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $language.FirstTitle) { $candidate }
+                } 12000
+                Check "the $culture demo popup appears" ([bool]$popup)
+                if (-not $popup) { continue }
+
+                Start-Sleep -Milliseconds 1500
+                # A real session could replace the demo during the animation. Never print its title or capture it.
+                $stillDemo = try {
+                    $candidate = Get-PopupWindow
+                    $candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $language.FirstTitle
+                } catch { $false }
+                Check "the $culture popup still shows the demo before capture" $stillDemo
+                if (-not $stillDemo) { continue }
+                Save-WorkAreaScreenshot "store-$culture-popup"
+
+                if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force }
+                $popupGone = Wait-For { -not (Get-PopupWindow) }
+                Check "the $culture popup disappears before the settings capture" ([bool]$popupGone)
+                if (-not $popupGone) { continue }
+
+                $row = Wait-For { Get-SettingsElement $FixtureAppId }
+                Check "the $culture settings show the demo app row" ([bool]$row)
+                if (-not $row) { continue }
+                $row.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView()
+                $settings = Wait-For { Get-SettingsWindow }
+                Check "the $culture settings window is available for capture" ([bool]$settings)
+                if (-not $settings) { continue }
+
+                $workArea = [SmokeNative+RECT]::new()
+                [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+                $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+                $width = [int](720 * $dpiScale)
+                $height = [int][Math]::Min(1040 * $dpiScale, $workArea.Bottom - $workArea.Top - 80 * $dpiScale)
+                $x = [int](($workArea.Left + $workArea.Right - $width) / 2)
+                $y = [int](($workArea.Top + $workArea.Bottom - $height) / 2)
+                # HWND_TOPMOST, SWP_NOACTIVATE. Keep the neutral backdrop behind settings.
+                $positioned = [SmokeNative]::SetWindowPos([IntPtr]$settings.Current.NativeWindowHandle, [IntPtr]::new(-1), $x, $y, $width, $height, 0x10)
+                Check "the $culture settings window is centered above the backdrop" $positioned
+                if (-not $positioned) { continue }
+                Start-Sleep -Milliseconds 500
+                Save-WorkAreaScreenshot "store-$culture-settings"
+            } finally {
+                if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
+                if ($backdrop -and -not $backdrop.HasExited) { Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue }
+                Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $albumPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-PopupSize {
     Open-Settings
     (Get-SettingsElement 'PopupSizeSlider').GetCurrentPattern($RangeValuePattern).SetValue(70)
@@ -861,6 +995,7 @@ $scenarios = [ordered]@{
     popupsize = { Test-PopupSize }
     dnd = { Test-DoNotDisturb }
     tray = { Test-Tray }
+    storeshots = { Save-StoreScreenshots }
 }
 $selected = $Scenario -split ','
 $unknown = $selected | Where-Object { -not $scenarios.Contains($_) }
