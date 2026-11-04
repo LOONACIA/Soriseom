@@ -1,0 +1,264 @@
+id: do-not-disturb
+goal: >
+  docs/PRD.md "3. 표시하지 않는 경우"의 방해 금지 항목을 구현한다. Windows 방해 금지가 켜져 있으면 곡이 바뀌어도 팝업을 띄우지 않고, 그 곡은 방해 금지가 끝난 뒤에도 띄우지 않으며, 다음 곡부터 다시 띄운다.
+  전체화면 중에는 방해 금지를 보지 않고 기존 "전체화면일 때 숨기기" 설정만 따른다. Windows가 전체화면 앱에서 방해 금지를 자동으로 켜므로, 함께 보면 그 설정을 꺼도 팝업이 뜨지 않기 때문이다.
+  상태를 알려주는 API가 없는 Windows에서는 방해 금지와 상관없이 지금처럼 띄운다. 스모크 스크립트의 새 dnd 시나리오가 실제 방해 금지 스위치로 이 동작을 확인한다.
+  완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 Debug, Release MSIX 생성이 통과하는 상태다. 방해 금지용 새 설정 항목, Windows 10 실제 확인은 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-hide-popup-in-do-not-disturb
+    title: hide the popup while do not disturb is on
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "구조 규칙", "테스트", "주의"), docs/PRD.md("3. 표시하지 않는 경우"), docs/ARCHITECTURE.md("데이터 흐름", "창과 셸 연동 (App)", "구현 전에 확인할 것"),
+      docs/ADR.md(ADR-004, ADR-006, ADR-008, ADR-010), `src/Soriseom.Core/PopupDecider.cs`, `tests/Soriseom.Core.Tests/PopupDeciderTests.cs`, `src/Soriseom.App/PopupController.cs`.
+
+      목표: 방해 금지가 켜져 있으면 팝업을 띄우지 않는다. 판단은 Core의 `PopupDecider`가 하고, 상태를 읽는 일은 App의 `PopupController`가 한다.
+
+      2026-11-04에 Windows 11(빌드 26300)에서 시험한 결과다. 아래 설계는 이 결과에서 나왔으니 다른 방식으로 바꾸지 마라.
+      - `ToastNotificationManager.GetDefault().NotificationMode`는 Windows 설정의 방해 금지 스위치를 켜면 곧바로 `PriorityOnly`, 끄면 `Unrestricted`가 된다.
+      - 전체 화면 창을 띄우면 스위치를 건드리지 않아도 Windows 자동 규칙으로 `AlarmsOnly`가 되고, 창이 사라지면 `Unrestricted`로 돌아온다.
+      - `SHQueryUserNotificationState`는 스위치를 켜도 값이 그대로다(`QUNS_ACCEPTS_NOTIFICATIONS`). 방해 금지 감지에 쓸 수 없다.
+      - `Windows.UI.Shell.FocusSessionManager`는 제한 액세스 기능이라 호출이 거부된다. 쓰지 마라.
+      - 문서상 `NotificationMode`는 `UniversalApiContract` v15, 10.0.23504부터 있다. 앱의 최소 버전(10.0.17763)에는 없으므로 호출 전에 확인해야 한다.
+
+      ## 1. `src/Soriseom.Core/PopupDecider.cs`
+      - `Decide`의 시그니처를 다음으로 바꾼다.
+        `public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, bool isFullscreen, DateTimeOffset now, bool isDoNotDisturb = false)`
+        기존 매개변수의 순서를 바꾸지 말고 새 매개변수를 끝에 선택 인자로 둔다. 이유: 기존 테스트 호출을 한 줄도 고치지 않아야 기존 동작이 그대로라는 것이 diff에서 보인다.
+      - 곡을 처리한 것으로 기록하는 `_processedArtist = snapshot.Artist;` 다음을 아래로 바꾼다. 주석 앞의 빈 줄은 SA1515 때문에 필요하다.
+      ```csharp
+              _processedArtist = snapshot.Artist;
+
+              // Windows can turn do not disturb on by itself for a full-screen app, so during full screen only the setting decides.
+              var hiddenByEnvironment = isFullscreen ? settings.HideWhenFullscreen : isDoNotDisturb;
+              if (!settings.IsAppEnabled(snapshot.AppId) || hiddenByEnvironment)
+              {
+                  return new(PopupAction.None, null, null);
+              }
+      ```
+      - `isFullscreen ? settings.HideWhenFullscreen : isDoNotDisturb`를 `(isFullscreen && settings.HideWhenFullscreen) || isDoNotDisturb`로 "단순화"하지 마라. 이유: 전체화면 자동 규칙이 `HideWhenFullscreen`이 꺼진 사용자의 팝업까지 숨기게 된다.
+      - 곡을 처리한 것으로 기록하는 위치는 그대로 두어, 방해 금지로 숨긴 곡이 끝난 뒤에 뜨지 않게 한다. 이유: 전체화면으로 숨긴 곡과 같은 규칙이다.
+
+      ## 2. `tests/Soriseom.Core.Tests/PopupDeciderTests.cs`
+      기존 테스트를 고치지 말고, `SuppressedTrackPreservesDisplayDeadline` 앞에 아래 두 테스트를 그대로 추가한다. 이 코드는 이 저장소의 분석기와 포맷 검사를 통과하고, 위 규칙을 `||`로 바꾸면 실패하는 것을 확인했다.
+      ```csharp
+          [Theory]
+          [InlineData(false, true, true, PopupAction.None)]
+          [InlineData(false, false, true, PopupAction.None)]
+          [InlineData(false, true, false, PopupAction.Show)]
+          [InlineData(true, true, true, PopupAction.None)]
+          [InlineData(true, false, true, PopupAction.Show)]
+          public void DoNotDisturbHidesThePopupOnlyOutsideFullscreen(bool isFullscreen, bool hideWhenFullscreen, bool isDoNotDisturb, PopupAction expectedAction)
+          {
+              var decider = new PopupDecider();
+              var settings = new AppSettings { HideWhenFullscreen = hideWhenFullscreen };
+              decider.Decide(null, settings, isFullscreen, Start, isDoNotDisturb);
+              var track = new MediaSnapshot("player", "Song", "Artist", true);
+              var changedAt = Start.AddSeconds(1);
+
+              decider.Decide(track, settings, isFullscreen, changedAt, isDoNotDisturb);
+              var expectedTrack = expectedAction == PopupAction.None ? null : track;
+              Assert.Equal(new(expectedAction, expectedTrack, null), decider.Decide(track, settings, isFullscreen, changedAt + PopupDecider.SettleDelay, isDoNotDisturb));
+          }
+
+          [Fact]
+          public void DoNotDisturbTrackStaysSuppressedAfterItEndsButNextTrackShows()
+          {
+              var decider = new PopupDecider();
+              var settings = new AppSettings();
+              decider.Decide(null, settings, isFullscreen: false, Start, isDoNotDisturb: true);
+              var track = new MediaSnapshot("player", "Song", "Artist", true);
+              var changedAt = Start.AddSeconds(1);
+              var settledAt = changedAt + PopupDecider.SettleDelay;
+
+              decider.Decide(track, settings, isFullscreen: false, changedAt, isDoNotDisturb: true);
+              Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt, isDoNotDisturb: true));
+              Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt.AddSeconds(1)));
+              var next = track with { Title = "Next" };
+              var nextAt = settledAt.AddSeconds(2);
+              decider.Decide(next, settings, isFullscreen: false, nextAt);
+              Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, settings, isFullscreen: false, nextAt + PopupDecider.SettleDelay));
+          }
+      ```
+
+      ## 3. `src/Soriseom.App/PopupController.cs`
+      - using을 추가한다: `Windows.Foundation.Metadata`, `Windows.UI.Notifications`. 기존 정렬 순서를 지킨다.
+      - `IsFullscreen` 다음에 아래 메서드를 그대로 추가한다. 이 코드는 이 저장소의 분석기를 경고 없이 통과하는 것을 확인했다.
+      ```csharp
+          private static bool IsDoNotDisturb()
+          {
+              if (!ApiInformation.IsPropertyPresent("Windows.UI.Notifications.ToastNotificationManagerForUser", "NotificationMode"))
+              {
+                  return false;
+              }
+
+              try
+              {
+                  return ToastNotificationManager.GetDefault().NotificationMode != ToastNotificationMode.Unrestricted;
+              }
+              catch (Exception exception)
+              {
+                  Debug.WriteLine($"Reading the notification mode failed: {exception}");
+                  return false;
+              }
+          }
+      ```
+      - `Evaluate`의 호출을 다음으로 바꾼다: `var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now, isDoNotDisturb: IsDoNotDisturb());`
+      - `NotificationModeChanged`를 구독하지 마라. 이유: 곡을 판단할 때마다 값을 읽으므로 필요 없다. `IsFullscreen`과 같은 방식이다.
+      - `IsDoNotDisturb`를 `IsFullscreen`에 합치지 마라. 이유: 두 조건은 Core에서 따로 판단한다.
+
+      ## 4. `docs/PRD.md`
+      "3. 표시하지 않는 경우"의 방해 금지 항목을 다음으로 바꾼다.
+      `- Windows 방해 금지 모드가 켜져 있을 때입니다. 전체화면 앱을 쓰는 중에는 방해 금지를 보지 않고 위의 전체화면 설정만 따릅니다. Windows가 전체화면 앱에서 방해 금지를 자동으로 켜므로, 함께 보면 전체화면 설정을 꺼도 팝업이 뜨지 않기 때문입니다. 상태를 알려주는 API가 없는 Windows 버전에서는 방해 금지와 상관없이 띄웁니다. 숨긴 곡은 방해 금지가 끝난 뒤에 띄우지 않습니다.`
+
+      ## 5. `docs/ARCHITECTURE.md`
+      - "창과 셸 연동 (App)"의 **전체화면 감지** 항목 다음 줄에 추가한다.
+        `- **방해 금지 감지**: `ToastNotificationManagerForUser.NotificationMode`가 `Unrestricted`가 아니면 켜진 것으로 봅니다. 곡을 판단할 때마다 읽으므로 `NotificationModeChanged`를 구독하지 않습니다. 문서 기준 10.0.23504 미만의 Windows에는 이 속성이 없어 `ApiInformation`으로 확인하고, 없으면 꺼진 것으로 봅니다. `SHQueryUserNotificationState`는 방해 금지를 반영하지 않습니다. 전체 화면 창을 띄우면 Windows 자동 규칙으로 값이 `AlarmsOnly`가 되므로, 전체화면 중에는 Core가 이 값을 보지 않습니다.`
+      - "구현 전에 확인할 것"의 방해 금지 항목을 다음으로 바꾼다.
+        `- [x] Windows 방해 금지 모드를 감지할 공식 API가 있는지: 있습니다. 2026-11-04에 Windows 11(빌드 26300)에서 설정의 스위치를 켜면 `PriorityOnly`, 끄면 `Unrestricted`가 되는 것을 확인했습니다. 더 낮은 버전은 확인하지 않았습니다.`
+
+      ## 하지 말 것
+      - 방해 금지용 설정 항목이나 `.resw` 문자열을 추가하지 마라. 이유: docs/PRD.md의 설정 표에 없다.
+      - `[DllImport]`, `[LibraryImport]`나 문서화되지 않은 WNF API를 쓰지 마라. 이유: ADR-008이고, 공식 API로 충분하다.
+      - `OperatingSystem.IsWindowsVersionAtLeast`로 바꾸지 마라. 이유: 문서의 도입 버전과 SDK 뷰가 어긋나므로, 빌드 번호를 추측하지 말고 속성이 실제로 있는지 확인한다.
+      - `AppSettings`, `tools/smoke/`, CLAUDE.md, ADR을 고치지 마라. 이유: 스모크와 그 문서는 다음 스텝에서 바꾼다. NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.Core/PopupDecider.cs
+      - tests/Soriseom.Core.Tests/PopupDeciderTests.cs
+      - src/Soriseom.App/PopupController.cs
+      - docs/PRD.md
+      - docs/ARCHITECTURE.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-method "*.PopupDeciderTests.DoNotDisturb*"'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-smoke-do-not-disturb
+    title: check do not disturb in the smoke script
+    type: feat
+    scope: tools
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "그 밖의 명령"과 "주의"), docs/ADR.md(ADR-009), `tools/smoke/Smoke.ps1` 전체, `tools/smoke/LanguageOverride.ps1`, `tools/smoke/MediaFixture.ps1`, `src/Soriseom.Core/PopupDecider.cs`.
+
+      목표: 스모크 스크립트가 실제 방해 금지 스위치를 켜서 팝업이 숨겨지는지 확인하고, 끈 뒤 다시 뜨는지 확인한다. 또 사용자가 방해 금지를 켜 둔 PC에서 media, popupsize 시나리오가 코드 문제로 오판하지 않고 종료 코드 3을 돌려주게 한다. 이전 스텝부터 앱은 방해 금지 중에 의도적으로 팝업을 숨기기 때문이다.
+
+      2026-11-04에 Windows 11(빌드 26300)에서 시험한 결과다. 아래 설계는 이 결과에서 나왔으니 다른 방식으로 바꾸지 마라.
+      - pwsh 7에는 WinRT 프로젝션이 없다. `NotificationMode`는 Windows PowerShell 5.1에서 읽는다. 패키지 ID 없이 읽힌다.
+      - 방해 금지를 켜는 공개 API는 없다. `FocusSessionManager`는 제한 액세스 기능이라 거부된다. Windows 설정의 스위치는 AutomationId `SystemSettings_Notifications_QuietHours_MuteNotification_Enabled_ToggleSwitch`에 TogglePattern이 있고, `ms-settings:notifications`로 연 뒤 UI Automation으로 바꿀 수 있다.
+      - 스위치를 바꾸면 `NotificationMode`는 곧바로 따라온다. `SystemSettings` 프로세스의 `CloseMainWindow()`로 설정 창을 닫아도 상태가 유지되고, 다시 `ms-settings:notifications`를 열어 끌 수 있다.
+      - 앱은 마지막으로 처리한 곡만 기억하므로, 테스트 곡 두 개를 방해 금지 중에 흘린 뒤 다시 흘리면 첫 곡이 새 곡으로 처리되어 팝업이 뜬다.
+
+      ## 1. `tools/smoke/NotificationMode.ps1` (새 파일)
+      아래 내용 그대로 만든다.
+      ```powershell
+      # Prints the current ToastNotificationManagerForUser.NotificationMode.
+      # Windows PowerShell 5.1 only: pwsh 7 has no WinRT projection.
+      $ErrorActionPreference = 'Stop'
+
+      [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+      [Windows.UI.Notifications.ToastNotificationManager]::GetDefault().NotificationMode.ToString()
+      ```
+
+      ## 2. `tools/smoke/Smoke.ps1`
+      - 머리말의 `.DESCRIPTION`: "restores the user's settings and startup state"를 "restores the user's settings, startup state and do not disturb"로 바꾸고, 종료 코드 3의 괄호에 do not disturb를 더한다: `(locked, full-screen, do not disturb, or other media playback holds the current session)`.
+      - `.PARAMETER Scenario`의 목록과 `param`의 `$Scenario` 기본값에서 `popupsize`와 `tray` 사이에 `dnd`를 넣는다. `$scenarios`에도 같은 위치에 `dnd = { Test-DoNotDisturb }`를 넣는다.
+      - `$StartupEnabled = 2` 다음 줄에 빈 줄과 함께 상수를 추가한다.
+      ```powershell
+      # Windows Settings has the only way to change do not disturb: no public API sets it.
+      $DoNotDisturbSwitchId = 'SystemSettings_Notifications_QuietHours_MuteNotification_Enabled_ToggleSwitch'
+      # Exists only while this script holds do not disturb on, so the next run can undo it if this one dies.
+      $DoNotDisturbMarker = Join-Path $BackupDir 'do-not-disturb-on.txt'
+      ```
+      - `Get-StartupState` 앞에 함수 세 개를 추가한다.
+      ```powershell
+      function Get-NotificationMode {
+          $helper = Join-Path $PSScriptRoot 'NotificationMode.ps1'
+          return (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper).Trim()
+      }
+
+      function Test-DoNotDisturbOn {
+          return (Get-NotificationMode) -ne 'Unrestricted'
+      }
+
+      function Set-DoNotDisturb([bool] $On) {
+          Start-Process 'ms-settings:notifications'
+          # Not named $condition: variables are case-insensitive, and Wait-For has a parameter called $Condition.
+          $byId = [System.Windows.Automation.PropertyCondition]::new($Ae::AutomationIdProperty, $DoNotDisturbSwitchId)
+          $element = Wait-For { $Ae::RootElement.FindFirst($Scope::Descendants, $byId) } 20000
+          if (-not $element) { throw 'the do not disturb switch was not found in Windows Settings' }
+
+          $toggle = $element.GetCurrentPattern($TogglePattern)
+          if (($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) -ne $On) { $toggle.Toggle() }
+          Get-Process SystemSettings -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }
+          if (-not (Wait-For { (Test-DoNotDisturbOn) -eq $On })) { throw "do not disturb did not change to $On" }
+      }
+      ```
+      - `Restore-UserState`: 맨 끝의 `Remove-Item $BackupDir -Recurse -Force` 바로 앞에 `if (Test-Path $DoNotDisturbMarker) { Set-DoNotDisturb $false }`를 넣는다. 맨 앞에 두지 마라. 이유: 스위치를 못 찾아 예외가 나도 설정과 자동 실행은 먼저 복원되어야 하고, 백업이 남으니 다음 실행이 다시 시도한다.
+      - `Watch-FixtureTracks`: 시그니처를 `function Watch-FixtureTracks([string] $ScreenshotName, [switch] $AllowDoNotDisturb)`로 바꾸고, `$reason`을 정하는 `if`/`elseif`의 끝에 분기를 더한다.
+      ```powershell
+          } elseif (-not $AllowDoNotDisturb -and (Test-DoNotDisturbOn)) {
+              $reason = 'do not disturb is on, and the app hides popups then by design; turn it off and run again'
+          }
+      ```
+      - `Test-PopupSize` 다음에 함수를 추가한다.
+      ```powershell
+      function Test-DoNotDisturb {
+          if (Test-DoNotDisturbOn) {
+              $script:UnavailableReason = 'do not disturb is already on, and this scenario has to turn it on itself; turn it off and run again'
+              Write-Line "SKIP dnd: $($script:UnavailableReason)"
+              return
+          }
+
+          Open-Settings
+          Set-Content $DoNotDisturbMarker ''
+          try {
+              Set-DoNotDisturb $true
+              $hidden = Watch-FixtureTracks -AllowDoNotDisturb
+          } finally {
+              Set-DoNotDisturb $false
+              Remove-Item $DoNotDisturbMarker -Force
+          }
+
+          if (-not $hidden) { return }
+          Check 'do not disturb hides the popup' (-not $hidden.First.Shown -and -not $hidden.Second.Shown)
+
+          $shown = Watch-FixtureTracks
+          if ($shown) { Check 'the popup shows again after do not disturb ends' $shown.First.Shown }
+      }
+      ```
+      - `Get-UnavailableReason`에 방해 금지 검사를 넣지 마라. 이유: 이 함수는 `-AfterSignIn`과 launch 같은 시나리오에도 쓰이는데, 그쪽은 팝업과 상관없어서 방해 금지 중에도 판정할 수 있다.
+      - 전체화면 자동 규칙(전체화면이면 설정만 따름)을 스모크로 확인하지 마라. 이유: 화면 전체를 가리는 창을 띄워야 하고, 이 규칙은 Core 테스트가 검증한다.
+
+      ## 3. `CLAUDE.md`
+      - "그 밖의 명령" 표의 앱 실행 확인 명령에서 시나리오 목록에 `dnd`를 `popupsize`와 `tray` 사이에 넣는다.
+      - "주의"의 "설정, 언어 재정의, 자동 실행 상태는 끝날 때 복원합니다."를 "설정, 언어 재정의, 자동 실행 상태, 방해 금지는 끝날 때 복원합니다."로 바꾼다.
+      - "주의"의 종료 코드 설명에서 "3 지금 이 PC에서 검사할 수 없음(화면 잠김, 전체화면, 다른 미디어 재생)"을 "3 지금 이 PC에서 검사할 수 없음(화면 잠김, 전체화면, 방해 금지, 다른 미디어 재생)"으로 바꾼다.
+
+      ## 4. `docs/ADR.md` ADR-009
+      "스크립트가 못 보는 항목(사람이 확인)" 목록 끝에 다음 항목을 추가한다.
+      `  - 전체화면 중의 방해 금지: 화면 전체를 가리는 창을 띄워야 해서 스크립트가 만들지 않습니다. Core 테스트가 규칙을 검증하니, 사람은 "전체화면일 때 숨기기"를 끄고 전체화면에서 곡을 넘겨 팝업이 뜨는지 확인합니다. dnd 시나리오는 Windows 설정의 방해 금지 스위치를 UI Automation으로 켰다가 끕니다. AutomationId는 공개 계약이 아니므로 Windows 업데이트로 깨질 수 있습니다.`
+
+      ## 하지 말 것
+      - 문서화되지 않은 WNF API(`NtUpdateWnfStateData`)로 방해 금지를 바꾸지 마라. 이유: Windows 설정의 스위치로 충분하고, 사용자가 쓰는 경로와 같다.
+      - 스크립트의 출력에 곡 제목을 남기지 마라. 이유: ADR-009.
+      - App, Core, 테스트, docs/PRD.md, docs/ARCHITECTURE.md를 고치지 마라. NuGet 패키지를 추가하지 마라.
+      - 앱과 스크립트를 실행하지 마라(CLAUDE.md "주의"). 스모크는 계획을 마무리할 때 Claude가 돌린다.
+    expected_files:
+      - tools/smoke/NotificationMode.ps1
+      - tools/smoke/Smoke.ps1
+      - CLAUDE.md
+      - docs/ADR.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/Smoke.ps1"'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/NotificationMode.ps1"'
+      - 'git grep -q "dnd = { Test-DoNotDisturb }" -- tools/smoke/Smoke.ps1'
