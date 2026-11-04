@@ -26,7 +26,7 @@
 | Voice title | 비워 둡니다. | 별도 음성 이름을 사용하지 않습니다. |
 | Additional system requirements | 비워 둡니다. | 추가 하드웨어 요구 사항이 없습니다. |
 
-카테고리는 [Store 카테고리 안내](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/categories-and-subcategories)를 참고합니다. 이름에는 설명이나 마케팅 문구를 붙이지 않고, 중요한 제한과 타사 서비스와의 관계를 Description에 명시합니다. 개인정보 접근 여부와 방침은 [Store 정책 10.1.1 및 10.5.1](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies)을 따릅니다.
+카테고리는 [Store 카테고리 안내](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/categories-and-subcategories)를 참고합니다. 이름에는 설명이나 마케팅 문구를 붙이지 않고, 중요한 제한과 타사 서비스와의 관계를 Description에 명시합니다. 개인정보 접근 여부와 방침은 [Store 정책 10.1.1 및 10.5.1](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies)을 따릅니다.
 
 아래 코드 블록 안의 내용만 해당 필드에 붙여 넣습니다. Product name은 해당 언어로 예약한 이름을 선택하며, 리소스의 `AppDisplayName`과 맞춥니다. Short description은 Description과 함께 표시되므로 첫 문단과 다른 문장으로 작성하고 공백 포함 270자 미만으로 유지합니다. Description은 일반 텍스트 10,000자 이하로 작성하며 HTML, 마크다운 기호, 코드, URL을 넣지 않습니다. Product features는 이 초안에서 3~10개로 구성하고 줄마다 200자 이하로 작성하며, Store가 글머리 기호를 붙이므로 직접 넣지 않습니다. [등록 문구 안내](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/add-and-edit-store-listing-info)를 참고합니다.
 
