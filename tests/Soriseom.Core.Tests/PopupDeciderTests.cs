@@ -270,6 +270,44 @@ public class PopupDeciderTests
     }
 
     [Theory]
+    [InlineData(false, true, true, PopupAction.None)]
+    [InlineData(false, false, true, PopupAction.None)]
+    [InlineData(false, true, false, PopupAction.Show)]
+    [InlineData(true, true, true, PopupAction.None)]
+    [InlineData(true, false, true, PopupAction.Show)]
+    public void DoNotDisturbHidesThePopupOnlyOutsideFullscreen(bool isFullscreen, bool hideWhenFullscreen, bool isDoNotDisturb, PopupAction expectedAction)
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings { HideWhenFullscreen = hideWhenFullscreen };
+        decider.Decide(null, settings, isFullscreen, Start, isDoNotDisturb);
+        var track = new MediaSnapshot("player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+
+        decider.Decide(track, settings, isFullscreen, changedAt, isDoNotDisturb);
+        var expectedTrack = expectedAction == PopupAction.None ? null : track;
+        Assert.Equal(new(expectedAction, expectedTrack, null), decider.Decide(track, settings, isFullscreen, changedAt + PopupDecider.SettleDelay, isDoNotDisturb));
+    }
+
+    [Fact]
+    public void DoNotDisturbTrackStaysSuppressedAfterItEndsButNextTrackShows()
+    {
+        var decider = new PopupDecider();
+        var settings = new AppSettings();
+        decider.Decide(null, settings, isFullscreen: false, Start, isDoNotDisturb: true);
+        var track = new MediaSnapshot("player", "Song", "Artist", true);
+        var changedAt = Start.AddSeconds(1);
+        var settledAt = changedAt + PopupDecider.SettleDelay;
+
+        decider.Decide(track, settings, isFullscreen: false, changedAt, isDoNotDisturb: true);
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt, isDoNotDisturb: true));
+        Assert.Equal(new(PopupAction.None, null, null), decider.Decide(track, settings, isFullscreen: false, settledAt.AddSeconds(1)));
+        var next = track with { Title = "Next" };
+        var nextAt = settledAt.AddSeconds(2);
+        decider.Decide(next, settings, isFullscreen: false, nextAt);
+        Assert.Equal(new(PopupAction.Show, next, null), decider.Decide(next, settings, isFullscreen: false, nextAt + PopupDecider.SettleDelay));
+    }
+
+    [Theory]
     [InlineData(false, -1, PopupAction.Replace)]
     [InlineData(false, 0, PopupAction.Show)]
     [InlineData(false, 1, PopupAction.Show)]

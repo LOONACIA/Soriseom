@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Soriseom.Core;
+using Windows.Foundation.Metadata;
 using Windows.Storage.Streams;
+using Windows.UI.Notifications;
 using Windows.Win32;
 using Windows.Win32.UI.Shell;
 
@@ -58,6 +60,24 @@ internal sealed class PopupController
         return false;
     }
 
+    private static bool IsDoNotDisturb()
+    {
+        if (!ApiInformation.IsPropertyPresent("Windows.UI.Notifications.ToastNotificationManagerForUser", "NotificationMode"))
+        {
+            return false;
+        }
+
+        try
+        {
+            return ToastNotificationManager.GetDefault().NotificationMode != ToastNotificationMode.Unrestricted;
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Reading the notification mode failed: {exception}");
+            return false;
+        }
+    }
+
     private void Evaluate()
     {
         if (_adapter.Current is { } snapshot)
@@ -67,7 +87,7 @@ internal sealed class PopupController
 
         var settings = _store.Current;
         var now = DateTimeOffset.UtcNow;
-        var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now);
+        var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now, isDoNotDisturb: IsDoNotDisturb());
         _reevaluateTimer.Stop();
         if (decision.ReevaluateAt is { } reevaluateAt)
         {

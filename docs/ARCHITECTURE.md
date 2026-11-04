@@ -59,6 +59,7 @@ App: 팝업 창
 - **단일 인스턴스**: Windows App SDK의 `AppInstance`로 두 번째 실행을 기존 인스턴스로 넘기고, 기존 인스턴스는 설정 창을 엽니다.
 - **자동 실행**: MSIX `StartupTask`를 매니페스트에서 `Enabled="true"`로 선언해 기본으로 켜고, 설정에서 끄고 켭니다. 상태의 원본은 `StartupTask.State`이며 LocalSettings에 저장하지 않습니다. 시작 방식은 `AppInstance.GetActivatedEventArgs().Kind`로 구분해 자동 실행이면 창을 열지 않습니다.
 - **전체화면 감지**: `SHQueryUserNotificationState`를 써서 Windows 알림과 같은 기준으로 판단합니다.
+- **방해 금지 감지**: `ToastNotificationManagerForUser.NotificationMode`가 `Unrestricted`가 아니면 켜진 것으로 봅니다. 곡을 판단할 때마다 읽으므로 `NotificationModeChanged`를 구독하지 않습니다. 문서 기준 10.0.23504 미만의 Windows에는 이 속성이 없어 `ApiInformation`으로 확인하고, 없으면 꺼진 것으로 봅니다. `SHQueryUserNotificationState`는 방해 금지를 반영하지 않습니다. 전체 화면 창을 띄우면 Windows 자동 규칙으로 값이 `AlarmsOnly`가 되므로, 전체화면 중에는 Core가 이 값을 보지 않습니다.
 
 ## 횡단 관심사
 
@@ -77,7 +78,7 @@ App: 팝업 창
 - [x] Release 빌드와 패키징: 트리밍을 유지하고 IL2104만 오류에서 뺍니다(ADR-010).
 - [ ] 패키지 앱에서 GSMTC를 쓰는 데 별도 capability가 필요한지
 - [x] WinUI 3 창에 Acrylic 배경과 클릭 통과(확장 창 스타일)를 함께 적용할 수 있는지: 됩니다. 2026-11-04에 Windows 11의 임시 창에서 화면 픽셀과 WindowFromPoint로 확인했습니다.
-- [ ] Windows 방해 금지 모드를 감지할 공식 API가 있는지. 없으면 이 기능은 빼고 PRD를 고칩니다.
+- [x] Windows 방해 금지 모드를 감지할 공식 API가 있는지: 있습니다. 2026-11-04에 Windows 11(빌드 26300)에서 설정의 스위치를 켜면 `PriorityOnly`, 끄면 `Unrestricted`가 되는 것을 확인했습니다. 더 낮은 버전은 확인하지 않았습니다.
 - [x] 언어 변경이 재시작 없이 반영되는지: `PrimaryLanguageOverride`는 이미 불러온 UI에 바로 반영된다는 보장이 없고 `x:Uid` 문자열도 갱신되지 않으므로, 재시작을 안내합니다.
 - [ ] Store 자동 제출 방식(msstore CLI와 Entra ID 앱 연동), 최초 제출을 수동으로 해야 하는지
 - [ ] Windows 10에서 팝업 바깥이 투명하게 보이는지: 2026-11-04에 Windows 11에서만 확인했습니다. SetLayeredWindowAttributes 없는 레이어드 창은 Windows 10에서 보이지 않을 수 있습니다. Acrylic도 Windows 11에서만 확인했습니다.

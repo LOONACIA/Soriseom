@@ -11,7 +11,7 @@ public sealed class PopupDecider
     private string? _processedArtist;
     private DateTimeOffset? _displayUntil;
 
-    public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, bool isFullscreen, DateTimeOffset now)
+    public PopupDecision Decide(MediaSnapshot? snapshot, AppSettings settings, bool isFullscreen, DateTimeOffset now, bool isDoNotDisturb = false)
     {
         if (!_initialized)
         {
@@ -52,7 +52,10 @@ public sealed class PopupDecider
 
         _processedTitle = snapshot.Title;
         _processedArtist = snapshot.Artist;
-        if (!settings.IsAppEnabled(snapshot.AppId) || (settings.HideWhenFullscreen && isFullscreen))
+
+        // Windows can turn do not disturb on by itself for a full-screen app, so during full screen only the setting decides.
+        var hiddenByEnvironment = isFullscreen ? settings.HideWhenFullscreen : isDoNotDisturb;
+        if (!settings.IsAppEnabled(snapshot.AppId) || hiddenByEnvironment)
         {
             return new(PopupAction.None, null, null);
         }
