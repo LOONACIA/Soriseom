@@ -61,7 +61,7 @@
 
 - **상태**: 채택
 - **결정**: 모든 프로젝트에 다음을 적용합니다.
-  - `TreatWarningsAsErrors`. NuGet 취약점 감사 경고 NU1901~NU1904는 경고로 남깁니다.
+  - `TreatWarningsAsErrors`. NuGet 취약점 감사 경고 NU1901~NU1904와 트리밍 경고 IL2104(ADR-010)는 경고로 남깁니다.
   - `Nullable`, `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)
   - StyleCop.Analyzers 1.3 이상. 1.2.x 이하는 C# 14 문법에서 오탐이 나므로 쓰지 않습니다.
   - 모든 하네스 스텝의 AC에 `dotnet format --verify-no-changes` 포함
@@ -105,3 +105,12 @@
   - 모양과 느낌: 스크린샷으로 배치와 글자는 보지만, 애니메이션과 Acrylic의 느낌은 판단하지 못합니다.
   - 작업 표시줄 테마 전환: Windows 모드를 바꾸면 화면 전체가 바뀌므로 스크립트가 건드리지 않습니다. 설정에서 Windows 모드를 바꿨을 때 트레이 아이콘이 따라 바뀌는지 사람이 확인합니다. 이때 앱이 종료되지 않는지, 팝업 색이 Windows 모드를 따르는지도 확인합니다.
 - **하네스에 미치는 영향**: 앱을 실행하는 명령을 `ac`에 넣지 마세요. Codex에게 앱을 실행하게 하지 마세요. `tools/smoke/`는 App 코드가 아니므로 `[DllImport]`를 쓸 수 있습니다(ADR-008 대상 아님). 곡 제목처럼 사용자의 데이터를 출력이나 로그에 남기지 마세요. 테스트 곡만 판정하고 다른 제목은 읽어 내지 않습니다.
+
+### ADR-010: Release는 트리밍을 유지하고 IL2104만 오류에서 뺀다
+
+- **상태**: 채택(2026-11-04, 사용자 결정)
+- **결정**: App 템플릿대로 Release에서 `PublishTrimmed`를 켜 둡니다. `Directory.Build.props`의 `WarningsNotAsErrors`에 IL2104를 더하고, 다른 트리밍 경고는 오류로 둡니다.
+- **이유**: 2026-11-04에 x64 패키지를 만들어 비교했습니다. 트리밍을 켜면 번들 32MB, 설치 크기 75MB이고, 끄면 81MB, 217MB입니다. 트리밍한 Release 빌드는 `tools/smoke/Smoke.ps1`의 31개 항목을 모두 통과했습니다. 문제가 생기면 `PublishTrimmed` 한 줄로 끌 수 있습니다.
+- **트레이드오프**: `Microsoft.Windows.SDK.NET`과 `WinRT.Runtime`은 트리밍에 안전하다는 보장이 없어서, 제거된 코드가 필요한 경로는 실행 중에 깨질 수 있습니다. IL2104는 어셈블리 단위 경고라 다른 어셈블리에서 나와도 빌드를 막지 못합니다. 2026-11-04 기준으로 이 경고를 내는 어셈블리는 위 두 개뿐이고, 늘어났는지는 Release 빌드 출력에서 봅니다.
+- **스모크가 못 보는 경로(출시 전 사람이 확인)**: 실제 앨범아트 로드(테스트 곡에는 썸네일이 없음), 트레이 오른쪽 클릭 메뉴와 종료, Windows 모드 전환.
+- **하네스에 미치는 영향**: IL2104 말고 다른 트리밍 경고를 `WarningsNotAsErrors`에 더하지 마세요. Release 전용 코드 분기를 넣지 마세요.

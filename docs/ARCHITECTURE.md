@@ -67,14 +67,14 @@ App: 팝업 창
 - **설정 저장**: `ApplicationData.Current.LocalSettings`. 키 이름은 한 곳에 상수로 모읍니다.
 - **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다. 언어 리소스는 번들의 기본 패키지에 넣습니다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store 번들에 한국어가 들어가지 않습니다.
 - **의존성**: Central Package Management로 버전을 고정합니다. 허용 목록은 `docs/ADR.md`의 "원칙"에 있습니다.
-- **품질 게이트**: `Directory.Build.props`에서 Nullable, `TreatWarningsAsErrors`(NU1901~NU1904 제외), `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)을 켭니다. StyleCop 규칙 조정은 `docs/ADR.md` ADR-006을 따릅니다.
+- **품질 게이트**: `Directory.Build.props`에서 Nullable, `TreatWarningsAsErrors`(NU1901~NU1904, IL2104 제외), `EnforceCodeStyleInBuild`, `GenerateDocumentationFile`(CS1591 끔)을 켭니다. StyleCop 규칙 조정은 `docs/ADR.md` ADR-006을 따릅니다.
 - **CI**: GitHub Actions(Windows runner). push와 PR에서 빌드, 테스트, 포맷 검사를 돌립니다. `vX.Y.Z` 태그를 push하면 패키지 버전 `X.Y.Z.0`으로 MSIX를 만들어 Store에 제출하고, 인증을 통과하면 자동으로 게시합니다.
 
 ## 구현 전에 확인할 것
 
 관련 스텝을 계획하기 전에 확인하고, 결과를 이 문서나 ADR에 반영합니다.
 
-- [ ] Release 빌드와 패키징: 템플릿은 Release에서 트리밍(`PublishTrimmed`)을 켜는데, `Microsoft.Windows.SDK.NET`과 `WinRT.Runtime`의 트리밍 경고(IL2104)가 경고=오류 설정 때문에 빌드를 실패시킵니다. 트리밍을 끌지, IL2104만 오류에서 뺄지 CI 스텝 전에 정합니다.
+- [x] Release 빌드와 패키징: 트리밍을 유지하고 IL2104만 오류에서 뺍니다(ADR-010).
 - [ ] 패키지 앱에서 GSMTC를 쓰는 데 별도 capability가 필요한지
 - [ ] WinUI 3 창에 Acrylic 배경과 클릭 통과(확장 창 스타일)를 함께 적용할 수 있는지
 - [ ] Windows 방해 금지 모드를 감지할 공식 API가 있는지. 없으면 이 기능은 빼고 PRD를 고칩니다.

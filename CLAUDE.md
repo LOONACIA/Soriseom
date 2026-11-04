@@ -45,6 +45,8 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 | 아이콘 에셋 최신 여부 검사 | `uv run tools/icons/render_icons.py --check` |
 | NuGet 패키지 추가 | `dotnet add <프로젝트 경로> package <패키지> --version <버전>` |
 | 취약 패키지 점검 | `dotnet package list --project Soriseom.slnx --vulnerable` |
+| Release 빌드 | `dotnet build Soriseom.slnx -p:Platform=x64 -c Release` |
+| Release MSIX 생성(서명 없음) | `dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
 | 로컬 MSIX 생성(Debug, 서명 없음) | `dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
 | 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Scenario launch,relaunch,startup,language,media,popupsize,tray]` |
 | 재로그인 직후 상태 확인(읽기 전용) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -AfterSignIn` |
@@ -58,13 +60,13 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 - Codex는 앱을 실행하지 않습니다(`dotnet run`, exe 실행, 패키지 등록, `tools/smoke/` 포함). 트레이에 상주하는 GUI 프로세스라 스스로 끝나지 않아 스텝이 타임아웃까지 멈춥니다.
 - Claude도 앱은 `tools/smoke/Smoke.ps1`로만 실행하고, 사용자가 요청했거나 App을 바꾼 하네스 계획을 마무리할 때만 돌립니다. 실제 데스크톱에 창을 띄우고 개발 패키지를 다시 등록합니다. 설정, 언어 재정의, 자동 실행 상태는 끝날 때 복원합니다.
 - `Smoke.ps1`의 종료 코드는 0 통과, 1 실패, 3 지금 이 PC에서 검사할 수 없음(화면 잠김, 전체화면, 다른 미디어 재생)입니다. 3은 코드와 무관합니다. 스크립트가 못 보는 항목은 `docs/ADR.md` ADR-009에 있고 사람이 확인합니다.
-- Release 빌드는 아직 실패합니다. 트리밍 경고(IL2104)가 오류로 처리되기 때문이며, 해결 방법은 `docs/ARCHITECTURE.md` "구현 전에 확인할 것"에 있습니다.
+- Release 빌드는 트리밍을 켠 채 만들며 IL2104 경고가 남습니다(ADR-010). 이 PC의 MSIX 생성에서는 `mspdbcmf.exe`를 찾지 못했다는 경고도 나오는데, 기호 패키지만 빠지고 빌드는 성공합니다.
 
 ## C# 규칙
 
 - .NET 10, C# 14(SDK 기본 `LangVersion`). `Nullable`과 `ImplicitUsings`를 켭니다.
 - 공통 빌드 설정은 `Directory.Build.props`, NuGet 버전은 `Directory.Packages.props`(Central Package Management), 스타일과 분석기 규칙은 루트 `.editorconfig`에 둡니다. 개별 `.csproj`에 같은 설정을 중복해서 넣지 않습니다.
-- 경고는 오류로 처리합니다. 예외는 NuGet 취약점 감사 경고(NU1901~NU1904)뿐입니다.
+- 경고는 오류로 처리합니다. 예외는 NuGet 취약점 감사 경고(NU1901~NU1904)와 트리밍 경고 IL2104(ADR-010)뿐입니다.
 - 분석기는 .NET 내장 분석기(`EnforceCodeStyleInBuild`)와 StyleCop.Analyzers(1.3 이상)를 씁니다.
 - 경고를 `#pragma warning disable`나 `[SuppressMessage]`로 숨기지 않습니다. 규칙이 프로젝트에 맞지 않으면 `.editorconfig`에서 사유 주석과 함께 끄고, 그 변경은 별도로 리뷰받습니다.
 - 이름 규칙
