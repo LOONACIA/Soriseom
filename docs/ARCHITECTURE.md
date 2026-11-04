@@ -65,7 +65,7 @@ App: 팝업 창
 ## 횡단 관심사
 
 - **에러 처리**: GSMTC, 썸네일, 셸 API가 실패해도 앱이 종료되지 않습니다. 썸네일을 못 읽으면 음표 아이콘을 쓰고, 세션 정보를 못 읽으면 그 팝업만 건너뜁니다. 예외는 디버그 출력에 남깁니다.
-- **로깅**: `System.Diagnostics.Debug` 출력만 씁니다. 파일 로그와 네트워크 전송은 없습니다.
+- **로깅**: `System.Diagnostics.Debug` 출력만 씁니다. 파일 로그와 네트워크 전송은 없습니다. 팝업 판단 경로는 Debug 빌드에서 `PopupTrace`로 출력합니다. Release에서는 호출 자체가 빠집니다. 스모크 스크립트가 이 출력을 저장하므로 제목, 아티스트, 앱 ID는 프로세스마다 달라지는 해시로만 남기고 예외는 형식과 HRESULT만 남깁니다.
 - **설정 저장**: `ApplicationData.Current.LocalSettings`. 키 이름은 한 곳에 상수로 모읍니다. 앱이 읽거나 저장하는 정보의 종류가 바뀌면 루트의 `PRIVACY.md`도 함께 고칩니다(Store 정책 10.5.1).
 - **현지화**: `Strings/en-US/Resources.resw`, `Strings/ko-KR/Resources.resw`. 언어를 직접 고르면 `ApplicationLanguages.PrimaryLanguageOverride`로 바꿉니다. 언어 리소스는 번들의 기본 패키지에 넣습니다(`AppxBundleAutoResourcePackageQualifiers`). 그렇지 않으면 Store 번들에 한국어가 들어가지 않습니다.
 - **의존성**: Central Package Management로 버전을 고정합니다. 허용 목록은 `docs/ADR.md`의 "원칙"에 있습니다.

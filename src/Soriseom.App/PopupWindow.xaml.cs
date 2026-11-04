@@ -101,6 +101,7 @@ public sealed partial class PopupWindow : Window
 
     public void ShowTrack(MediaSnapshot track, IRandomAccessStreamReference? thumbnail, PopupPosition position, int sizePercent)
     {
+        PopupTrace.Write($"window show visible={_isVisible} closing={_isClosing}");
         TitleText.Text = track.Title;
         ArtistText.Text = track.Artist;
 
@@ -136,6 +137,7 @@ public sealed partial class PopupWindow : Window
             _islandVisual.Opacity = 0;
             _islandVisual.Scale = new Vector3(HiddenScale, HiddenScale, 1);
             AppWindow.Show(false);
+            PopupTrace.Write($"window shown isVisible={AppWindow.IsVisible}");
             StartOpenAnimation(HeightDip, _appearScaleDuration);
         }
         else if (_isClosing)
@@ -158,6 +160,7 @@ public sealed partial class PopupWindow : Window
             return;
         }
 
+        PopupTrace.Write("window hide begin");
         _isClosing = true;
         var version = ++_animationVersion;
         var batch = _islandVisual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
@@ -167,6 +170,7 @@ public sealed partial class PopupWindow : Window
         batch.End();
         batch.Completed += (_, _) =>
         {
+            PopupTrace.Write($"window hide completed current={version == _animationVersion}");
             if (version == _animationVersion)
             {
                 AppWindow.Hide();

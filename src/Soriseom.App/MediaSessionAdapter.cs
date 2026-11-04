@@ -28,12 +28,16 @@ internal sealed class MediaSessionAdapter
     {
         try
         {
+            PopupTrace.Write("adapter request begin");
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            PopupTrace.Write("adapter request end");
             _manager.CurrentSessionChanged += OnCurrentSessionChanged;
             await AttachCurrentSessionAsync();
+            PopupTrace.Write("adapter start end");
         }
         catch (Exception exception)
         {
+            PopupTrace.Failure("adapter start", exception);
             Debug.WriteLine(exception);
             Current = null;
         }
@@ -41,17 +45,20 @@ internal sealed class MediaSessionAdapter
 
     private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args)
     {
-        _dispatcherQueue.TryEnqueue(async () => await AttachCurrentSessionAsync());
+        bool queued = _dispatcherQueue.TryEnqueue(async () => await AttachCurrentSessionAsync());
+        PopupTrace.Write($"event session queued={queued}");
     }
 
     private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args)
     {
-        _dispatcherQueue.TryEnqueue(async () => await RefreshMediaPropertiesAsync());
+        bool queued = _dispatcherQueue.TryEnqueue(async () => await RefreshMediaPropertiesAsync());
+        PopupTrace.Write($"event properties queued={queued}");
     }
 
     private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
     {
-        _dispatcherQueue.TryEnqueue(RefreshPlaybackInfo);
+        bool queued = _dispatcherQueue.TryEnqueue(RefreshPlaybackInfo);
+        PopupTrace.Write($"event playback queued={queued}");
     }
 
     private async Task AttachCurrentSessionAsync()
@@ -66,6 +73,7 @@ internal sealed class MediaSessionAdapter
 
             _readVersion++;
             _session = _manager?.GetCurrentSession();
+            PopupTrace.Write($"attach session={PopupTrace.Mask(_session?.SourceAppUserModelId)} version={_readVersion}");
             Current = null;
             if (_session is null)
             {
@@ -80,6 +88,7 @@ internal sealed class MediaSessionAdapter
         }
         catch (Exception exception)
         {
+            PopupTrace.Failure("attach", exception);
             Debug.WriteLine(exception);
         }
     }
@@ -93,21 +102,25 @@ internal sealed class MediaSessionAdapter
         }
 
         var version = ++_readVersion;
+        PopupTrace.Write($"read begin version={version}");
         try
         {
             var properties = await session.TryGetMediaPropertiesAsync();
             if (version != _readVersion || session != _session)
             {
+                PopupTrace.Write($"read dropped version={version} latest={_readVersion} sameSession={session == _session}");
                 return;
             }
 
             bool isPlaying = session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             Current = new MediaSnapshot(session.SourceAppUserModelId, properties.Title ?? string.Empty, properties.Artist ?? string.Empty, isPlaying);
             CurrentThumbnail = properties.Thumbnail;
+            PopupTrace.Write($"read end version={version} app={PopupTrace.Mask(session.SourceAppUserModelId)} title={PopupTrace.Mask(properties.Title)} artist={PopupTrace.Mask(properties.Artist)} playing={isPlaying} thumbnail={properties.Thumbnail is not null}");
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
         {
+            PopupTrace.Failure($"read version={version}", exception);
             Debug.WriteLine(exception);
         }
     }
@@ -116,6 +129,7 @@ internal sealed class MediaSessionAdapter
     {
         if (_session is not { } session || Current is not { } track)
         {
+            PopupTrace.Write("playback skipped");
             return;
         }
 
@@ -123,10 +137,12 @@ internal sealed class MediaSessionAdapter
         {
             bool isPlaying = session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             Current = new MediaSnapshot(session.SourceAppUserModelId, track.Title, track.Artist, isPlaying);
+            PopupTrace.Write($"playback playing={isPlaying}");
             Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
         {
+            PopupTrace.Failure("playback", exception);
             Debug.WriteLine(exception);
         }
     }

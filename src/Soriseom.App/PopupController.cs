@@ -29,11 +29,16 @@ internal sealed class PopupController
         _store = store;
         _reevaluateTimer = dispatcherQueue.CreateTimer();
         _reevaluateTimer.IsRepeating = false;
-        _reevaluateTimer.Tick += (_, _) => Evaluate();
+        _reevaluateTimer.Tick += (_, _) =>
+        {
+            PopupTrace.Write("reevaluate tick");
+            Evaluate();
+        };
         _hideTimer = dispatcherQueue.CreateTimer();
         _hideTimer.IsRepeating = false;
         _hideTimer.Tick += (_, _) =>
         {
+            PopupTrace.Write("hide tick");
             _isShowing = false;
             _window.HidePopup();
         };
@@ -41,8 +46,10 @@ internal sealed class PopupController
 
     public async Task StartAsync()
     {
+        PopupTrace.Write("controller start begin");
         await _adapter.StartAsync();
         _adapter.Changed += (_, _) => Evaluate();
+        PopupTrace.Write("controller subscribed");
         Evaluate();
     }
 
@@ -82,12 +89,17 @@ internal sealed class PopupController
     {
         if (_adapter.Current is { } snapshot)
         {
+            PopupTrace.Write("store update begin");
             _store.Update(_store.Current.WithAppSeen(snapshot.AppId));
+            PopupTrace.Write("store update end");
         }
 
         var settings = _store.Current;
         var now = DateTimeOffset.UtcNow;
-        var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: IsFullscreen(), now, isDoNotDisturb: IsDoNotDisturb());
+        var isFullscreen = IsFullscreen();
+        var isDoNotDisturb = IsDoNotDisturb();
+        var decision = _decider.Decide(_adapter.Current, settings, isFullscreen: isFullscreen, now, isDoNotDisturb: isDoNotDisturb);
+        PopupTrace.Write($"evaluate app={PopupTrace.Mask(_adapter.Current?.AppId)} title={PopupTrace.Mask(_adapter.Current?.Title)} artist={PopupTrace.Mask(_adapter.Current?.Artist)} playing={_adapter.Current?.IsPlaying} appEnabled={_adapter.Current is null || settings.IsAppEnabled(_adapter.Current.AppId)} fullscreen={isFullscreen} dnd={isDoNotDisturb} action={decision.Action} reevaluateMs={(decision.ReevaluateAt - now)?.TotalMilliseconds}");
         _reevaluateTimer.Stop();
         if (decision.ReevaluateAt is { } reevaluateAt)
         {
