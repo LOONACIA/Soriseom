@@ -2,11 +2,14 @@ using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Soriseom.Core;
+using Windows.Foundation;
 using Windows.Graphics;
 using Windows.Storage.Streams;
 using Windows.Win32;
@@ -38,6 +41,7 @@ public sealed partial class PopupWindow : Window
     private readonly Visual _contentVisual;
     private readonly RectangleClip _clip;
     private readonly CompositionEasingFunction _easing;
+    private Storyboard? _widthAnimation;
     private bool _isVisible;
     private bool _isClosing;
     private long _animationVersion;
@@ -52,9 +56,19 @@ public sealed partial class PopupWindow : Window
         var compositor = _islandVisual.Compositor;
         var radius = new Vector2(HeightDip / 2f);
         _clip = compositor.CreateRectangleClip(CollapsedLeftDip, 0, CollapsedRightDip, HeightDip, radius, radius, radius, radius);
-        _islandVisual.Clip = _clip;
+        ElementCompositionPreview.GetElementVisual(IslandForeground).Clip = _clip;
         _islandVisual.CenterPoint = new Vector3(WidthDip / 2f, HeightDip / 2f, 0);
         _easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0), new Vector2(0, 1));
+        IslandBackdrop.SizeChanged += (_, args) => FollowBackdropWidth(args.NewSize.Width);
+        if (DesktopAcrylicController.IsSupported())
+        {
+            IslandBackdrop.SystemBackdrop = new PopupAcrylicBackdrop();
+        }
+        else
+        {
+            SolidFallback.Visibility = Visibility.Visible;
+        }
+
         AlbumArtBrush.ImageFailed += (_, args) =>
         {
             Debug.WriteLine(args.ErrorMessage);
@@ -114,17 +128,15 @@ public sealed partial class PopupWindow : Window
         if (!_isVisible)
         {
             _isVisible = true;
-            _clip.Left = CollapsedLeftDip;
-            _clip.Right = CollapsedRightDip;
-            _contentVisual.Properties.InsertVector3("Translation", new Vector3(CollapsedLeftDip, 0, 0));
+            FollowBackdropWidth(HeightDip);
             _islandVisual.Opacity = 0;
             _islandVisual.Scale = new Vector3(HiddenScale, HiddenScale, 1);
             AppWindow.Show(false);
-            StartOpenAnimation(_appearScaleDuration);
+            StartOpenAnimation(HeightDip, _appearScaleDuration);
         }
         else if (_isClosing)
         {
-            StartOpenAnimation(TimeSpan.Zero);
+            StartOpenAnimation(IslandBackdrop.ActualWidth, TimeSpan.Zero);
         }
 
         _ = LoadThumbnailAsync(thumbnail);
@@ -145,10 +157,8 @@ public sealed partial class PopupWindow : Window
         _isClosing = true;
         var version = ++_animationVersion;
         var batch = _islandVisual.Compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        AnimateScalar(_clip, "Left", CollapsedLeftDip, _collapseDuration, TimeSpan.Zero);
-        AnimateScalar(_clip, "Right", CollapsedRightDip, _collapseDuration, TimeSpan.Zero);
-        AnimateScalar(_contentVisual, "Translation.X", CollapsedLeftDip, _collapseDuration, TimeSpan.Zero);
-        AnimateScalar(_islandVisual, "Opacity", 0, _disappearOpacityDuration, _collapseDuration);
+        AnimateBackdropWidth(IslandBackdrop.ActualWidth, HeightDip, _collapseDuration, TimeSpan.Zero);
+        AnimateOpacity(0, _disappearOpacityDuration, _collapseDuration);
         AnimateScale(HiddenScale, _disappearScaleDuration, _collapseDuration);
         batch.End();
         batch.Completed += (_, _) =>
@@ -162,7 +172,35 @@ public sealed partial class PopupWindow : Window
         };
     }
 
-    private void AnimateScalar(CompositionObject target, string property, float to, TimeSpan duration, TimeSpan delay)
+    // Composition drops a rounded clip on the acrylic and on its ancestors, so the round shape comes from the acrylic's own
+    // size and corner radius. Its width is layout, so the clip and the content follow it to stay on the same frame.
+    private void AnimateBackdropWidth(double from, double to, TimeSpan duration, TimeSpan delay)
+    {
+        _widthAnimation?.Stop();
+        IslandBackdrop.Width = from;
+        var frames = new DoubleAnimationUsingKeyFrames { EnableDependentAnimation = true, BeginTime = delay };
+        frames.KeyFrames.Add(new SplineDoubleKeyFrame
+        {
+            KeyTime = KeyTime.FromTimeSpan(duration),
+            Value = to,
+            KeySpline = new KeySpline { ControlPoint1 = new Point(0.2, 0), ControlPoint2 = new Point(0, 1) },
+        });
+        Storyboard.SetTarget(frames, IslandBackdrop);
+        Storyboard.SetTargetProperty(frames, "Width");
+        _widthAnimation = new Storyboard();
+        _widthAnimation.Children.Add(frames);
+        _widthAnimation.Begin();
+    }
+
+    private void FollowBackdropWidth(double width)
+    {
+        float left = (WidthDip - (float)width) / 2;
+        _clip.Left = left;
+        _clip.Right = WidthDip - left;
+        _contentVisual.Properties.InsertVector3("Translation", new Vector3(left, 0, 0));
+    }
+
+    private void AnimateOpacity(float to, TimeSpan duration, TimeSpan delay)
     {
         var animation = _islandVisual.Compositor.CreateScalarKeyFrameAnimation();
         animation.Duration = duration;
@@ -170,7 +208,7 @@ public sealed partial class PopupWindow : Window
         animation.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
         animation.InsertExpressionKeyFrame(0, "this.StartingValue");
         animation.InsertKeyFrame(1, to, _easing);
-        target.StartAnimation(property, animation);
+        _islandVisual.StartAnimation("Opacity", animation);
     }
 
     private void AnimateScale(float to, TimeSpan duration, TimeSpan delay)
@@ -184,15 +222,13 @@ public sealed partial class PopupWindow : Window
         _islandVisual.StartAnimation("Scale", animation);
     }
 
-    private void StartOpenAnimation(TimeSpan spreadDelay)
+    private void StartOpenAnimation(double fromWidth, TimeSpan spreadDelay)
     {
         _isClosing = false;
         _animationVersion++;
-        AnimateScalar(_islandVisual, "Opacity", 1, _appearOpacityDuration, TimeSpan.Zero);
+        AnimateOpacity(1, _appearOpacityDuration, TimeSpan.Zero);
         AnimateScale(1, _appearScaleDuration, TimeSpan.Zero);
-        AnimateScalar(_clip, "Left", 0, _spreadDuration, spreadDelay);
-        AnimateScalar(_clip, "Right", WidthDip, _spreadDuration, spreadDelay);
-        AnimateScalar(_contentVisual, "Translation.X", 0, _spreadDuration, spreadDelay);
+        AnimateBackdropWidth(fromWidth, WidthDip, _spreadDuration, spreadDelay);
     }
 
     private async Task LoadThumbnailAsync(IRandomAccessStreamReference? thumbnail)
