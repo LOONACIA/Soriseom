@@ -16,6 +16,10 @@
 .PARAMETER Scenario
     Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, tray.
 
+.PARAMETER Configuration
+    Build configuration. Defaults to Debug; Release is the trimmed build users receive.
+    The dev package remains registered with this build after the run ends.
+
 .PARAMETER AfterSignIn
     Read-only check to run after a real sign-in: no build, no deploy, no launch.
 
@@ -27,6 +31,7 @@
 #>
 param(
     [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,tray',
+    [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Debug',
     [switch] $AfterSignIn,
     [string] $OutDir
 )
@@ -207,7 +212,9 @@ function Restore-UserState {
 }
 
 function Build-Msix {
-    $output = & dotnet build $AppProject -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false -v q 2>&1
+    # Remove old packages so skipped packaging cannot select a stale MSIX from another configuration.
+    Remove-Item -LiteralPath (Join-Path $AppProject 'AppPackages') -Recurse -Force -ErrorAction SilentlyContinue
+    $output = & dotnet build $AppProject -c $Configuration -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false -p:AppxBundle=Never -v q 2>&1
     if ($LASTEXITCODE -ne 0) {
         $output | ForEach-Object { Write-Line "$_" }
         throw 'build failed'

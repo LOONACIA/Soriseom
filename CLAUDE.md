@@ -48,7 +48,7 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 | Release 빌드 | `dotnet build Soriseom.slnx -p:Platform=x64 -c Release` |
 | Release MSIX 생성(서명 없음) | `dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
 | 로컬 MSIX 생성(Debug, 서명 없음) | `dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
-| 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Scenario launch,relaunch,startup,language,media,popupsize,tray]` |
+| 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Configuration Release] [-Scenario launch,relaunch,startup,language,media,popupsize,tray]` |
 | 재로그인 직후 상태 확인(읽기 전용) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -AfterSignIn` |
 
 ### 주의
@@ -58,7 +58,7 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 - 패키지를 추가하면 버전은 `Directory.Packages.props`에 자동으로 들어가고 `.csproj`에는 버전 없는 참조만 남습니다. `docs/ADR.md`에 없는 패키지는 추가하지 않습니다.
 - MSIX는 `src/Soriseom.App/AppPackages/`에 생깁니다(git에서 무시됨).
 - Codex는 앱을 실행하지 않습니다(`dotnet run`, exe 실행, 패키지 등록, `tools/smoke/` 포함). 트레이에 상주하는 GUI 프로세스라 스스로 끝나지 않아 스텝이 타임아웃까지 멈춥니다.
-- Claude도 앱은 `tools/smoke/Smoke.ps1`로만 실행하고, 사용자가 요청했거나 App을 바꾼 하네스 계획을 마무리할 때만 돌립니다. 실제 데스크톱에 창을 띄우고 개발 패키지를 다시 등록합니다. 설정, 언어 재정의, 자동 실행 상태는 끝날 때 복원합니다.
+- Claude도 앱은 `tools/smoke/Smoke.ps1`로만 실행하고, 사용자가 요청했거나 App을 바꾼 하네스 계획을 마무리할 때만 돌립니다. App을 바꾼 하네스 계획을 마무리할 때는 `-Configuration Release`로 돌립니다. 트리밍 문제는 Release에서만 드러나기 때문입니다. 실제 데스크톱에 창을 띄우고 개발 패키지를 다시 등록합니다. 설정, 언어 재정의, 자동 실행 상태는 끝날 때 복원합니다.
 - `Smoke.ps1`의 종료 코드는 0 통과, 1 실패, 3 지금 이 PC에서 검사할 수 없음(화면 잠김, 전체화면, 다른 미디어 재생)입니다. 3은 코드와 무관합니다. 스크립트가 못 보는 항목은 `docs/ADR.md` ADR-009에 있고 사람이 확인합니다.
 - Release 빌드는 트리밍을 켠 채 만들며 IL2104 경고가 남습니다(ADR-010). 이 PC의 MSIX 생성에서는 `mspdbcmf.exe`를 찾지 못했다는 경고도 나오는데, 기호 패키지만 빠지고 빌드는 성공합니다.
 
