@@ -37,16 +37,29 @@
                     Value="{x:Bind ViewModel.DisplaySeconds, Mode=TwoWay}" />
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
-                <ComboBox
-                    x:Uid="PositionComboBox"
-                    SelectedIndex="{x:Bind ViewModel.PositionIndex, Mode=TwoWay}">
-                    <ComboBoxItem x:Uid="PositionTopLeft" />
-                    <ComboBoxItem x:Uid="PositionTopCenter" />
-                    <ComboBoxItem x:Uid="PositionTopRight" />
-                    <ComboBoxItem x:Uid="PositionBottomLeft" />
-                    <ComboBoxItem x:Uid="PositionBottomCenter" />
-                    <ComboBoxItem x:Uid="PositionBottomRight" />
-                </ComboBox>
+                <Grid MinHeight="40" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="PositionLabel"
+                        x:Uid="PositionLabel"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <ComboBox
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.LabeledBy="{x:Bind PositionLabel}"
+                        SelectedIndex="{x:Bind ViewModel.PositionIndex, Mode=TwoWay}">
+                        <ComboBoxItem x:Uid="PositionTopLeft" />
+                        <ComboBoxItem x:Uid="PositionTopCenter" />
+                        <ComboBoxItem x:Uid="PositionTopRight" />
+                        <ComboBoxItem x:Uid="PositionBottomLeft" />
+                        <ComboBoxItem x:Uid="PositionBottomCenter" />
+                        <ComboBoxItem x:Uid="PositionBottomRight" />
+                    </ComboBox>
+                </Grid>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
                 <Slider
@@ -61,17 +74,43 @@
                     Value="{x:Bind ViewModel.PopupSizePercent, Mode=TwoWay}" />
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
-                <ToggleSwitch
-                    x:Uid="HideWhenFullscreenToggle"
-                    IsOn="{x:Bind ViewModel.HideWhenFullscreen, Mode=TwoWay}" />
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="HideWhenFullscreenLabel"
+                        x:Uid="HideWhenFullscreenLabel"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <ToggleSwitch
+                        Grid.Column="1"
+                        MinWidth="0"
+                        AutomationProperties.LabeledBy="{x:Bind HideWhenFullscreenLabel}"
+                        IsOn="{x:Bind ViewModel.HideWhenFullscreen, Mode=TwoWay}" />
+                </Grid>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
                 <StackPanel Spacing="4">
-                    <ToggleSwitch
-                        x:Uid="LaunchAtStartupToggle"
-                        AutomationProperties.AutomationId="LaunchAtStartupToggle"
-                        IsOn="{x:Bind ViewModel.LaunchAtStartup, Mode=TwoWay}"
-                        IsEnabled="{x:Bind ViewModel.CanChangeLaunchAtStartup, Mode=OneWay}" />
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="LaunchAtStartupLabel"
+                            x:Uid="LaunchAtStartupLabel"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                        <ToggleSwitch
+                            Grid.Column="1"
+                            MinWidth="0"
+                            AutomationProperties.AutomationId="LaunchAtStartupToggle"
+                            AutomationProperties.LabeledBy="{x:Bind LaunchAtStartupLabel}"
+                            IsOn="{x:Bind ViewModel.LaunchAtStartup, Mode=TwoWay}"
+                            IsEnabled="{x:Bind ViewModel.CanChangeLaunchAtStartup, Mode=OneWay}" />
+                    </Grid>
                     <TextBlock
                         x:Uid="LaunchAtStartupNotice"
                         AutomationProperties.AutomationId="LaunchAtStartupNotice"
@@ -82,25 +121,51 @@
                 </StackPanel>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
-                <ComboBox
-                    x:Uid="ThemeComboBox"
-                    AutomationProperties.AutomationId="ThemeComboBox"
-                    SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
-                    <ComboBoxItem x:Uid="ThemeSystem" AutomationProperties.AutomationId="ThemeSystem" />
-                    <ComboBoxItem x:Uid="ThemeLight" AutomationProperties.AutomationId="ThemeLight" />
-                    <ComboBoxItem x:Uid="ThemeDark" AutomationProperties.AutomationId="ThemeDark" />
-                </ComboBox>
+                <Grid MinHeight="40" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="ThemeLabel"
+                        x:Uid="ThemeLabel"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <ComboBox
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="ThemeComboBox"
+                        AutomationProperties.LabeledBy="{x:Bind ThemeLabel}"
+                        SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
+                        <ComboBoxItem x:Uid="ThemeSystem" AutomationProperties.AutomationId="ThemeSystem" />
+                        <ComboBoxItem x:Uid="ThemeLight" AutomationProperties.AutomationId="ThemeLight" />
+                        <ComboBoxItem x:Uid="ThemeDark" AutomationProperties.AutomationId="ThemeDark" />
+                    </ComboBox>
+                </Grid>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
                 <StackPanel Spacing="4">
-                    <ComboBox
-                        x:Uid="LanguageComboBox"
-                        AutomationProperties.AutomationId="LanguageComboBox"
-                        SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
-                        <ComboBoxItem x:Uid="LanguageSystem" AutomationProperties.AutomationId="LanguageSystem" />
-                        <ComboBoxItem x:Uid="LanguageKorean" AutomationProperties.AutomationId="LanguageKorean" />
-                        <ComboBoxItem x:Uid="LanguageEnglish" AutomationProperties.AutomationId="LanguageEnglish" />
-                    </ComboBox>
+                    <Grid MinHeight="40" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="LanguageLabel"
+                            x:Uid="LanguageLabel"
+                            VerticalAlignment="Center"
+                            TextWrapping="Wrap" />
+                        <ComboBox
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="LanguageComboBox"
+                            AutomationProperties.LabeledBy="{x:Bind LanguageLabel}"
+                            SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
+                            <ComboBoxItem x:Uid="LanguageSystem" AutomationProperties.AutomationId="LanguageSystem" />
+                            <ComboBoxItem x:Uid="LanguageKorean" AutomationProperties.AutomationId="LanguageKorean" />
+                            <ComboBoxItem x:Uid="LanguageEnglish" AutomationProperties.AutomationId="LanguageEnglish" />
+                        </ComboBox>
+                    </Grid>
                     <TextBlock
                         x:Uid="LanguageRestartNotice"
                         AutomationProperties.AutomationId="LanguageRestartNotice"
@@ -126,10 +191,22 @@
                 <ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="local:AppToggleViewModel">
                         <Border Style="{StaticResource SettingsCardStyle}">
-                            <ToggleSwitch
-                                AutomationProperties.AutomationId="{x:Bind AppId}"
-                                Header="{x:Bind DisplayName}"
-                                IsOn="{x:Bind IsEnabled, Mode=TwoWay}" />
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Text="{x:Bind DisplayName}"
+                                    VerticalAlignment="Center"
+                                    TextWrapping="Wrap" />
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    MinWidth="0"
+                                    AutomationProperties.AutomationId="{x:Bind AppId}"
+                                    AutomationProperties.Name="{x:Bind DisplayName}"
+                                    IsOn="{x:Bind IsEnabled, Mode=TwoWay}" />
+                            </Grid>
                         </Border>
                     </DataTemplate>
                 </ItemsRepeater.ItemTemplate>

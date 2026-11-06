@@ -76,7 +76,7 @@
   <data name="PopupSizeSlider.Header" xml:space="preserve">
     <value>Popup size (%)</value>
   </data>
-  <data name="PositionComboBox.Header" xml:space="preserve">
+  <data name="PositionLabel.Text" xml:space="preserve">
     <value>Position</value>
   </data>
   <data name="PositionTopLeft.Content" xml:space="preserve">
@@ -97,16 +97,16 @@
   <data name="PositionBottomRight.Content" xml:space="preserve">
     <value>Bottom right</value>
   </data>
-  <data name="HideWhenFullscreenToggle.Header" xml:space="preserve">
+  <data name="HideWhenFullscreenLabel.Text" xml:space="preserve">
     <value>Hide while an app is full screen</value>
   </data>
-  <data name="LaunchAtStartupToggle.Header" xml:space="preserve">
+  <data name="LaunchAtStartupLabel.Text" xml:space="preserve">
     <value>Start when I sign in</value>
   </data>
   <data name="LaunchAtStartupNotice.Text" xml:space="preserve">
     <value>Windows manages this setting. You can change it in Settings &gt; Apps &gt; Startup or on the Startup apps tab in Task Manager.</value>
   </data>
-  <data name="ThemeComboBox.Header" xml:space="preserve">
+  <data name="ThemeLabel.Text" xml:space="preserve">
     <value>App theme</value>
   </data>
   <data name="ThemeSystem.Content" xml:space="preserve">
@@ -118,7 +118,7 @@
   <data name="ThemeDark.Content" xml:space="preserve">
     <value>Dark</value>
   </data>
-  <data name="LanguageComboBox.Header" xml:space="preserve">
+  <data name="LanguageLabel.Text" xml:space="preserve">
     <value>Language</value>
   </data>
   <data name="LanguageSystem.Content" xml:space="preserve">
