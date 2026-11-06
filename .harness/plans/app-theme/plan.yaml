@@ -1,0 +1,395 @@
+id: app-theme
+goal: >
+  설정 창에 "앱 테마" 항목(시스템 설정 사용 / 밝게 / 어둡게, 기본 시스템 설정 사용)을 추가해, 팝업과 설정 창이 Windows 모드 대신 사용자가 고른 라이트/다크 테마를 쓸 수 있게 한다.
+  바꾼 테마는 저장 버튼 없이 바로 저장되고 재시작 없이 바로 적용된다. 시스템 설정 사용이면 지금처럼 Windows의 앱 모드를 따른다.
+  트레이 아이콘은 작업 표시줄 색에 맞춰야 하므로 앱 테마와 상관없이 지금처럼 작업 표시줄 테마를 따른다.
+  스모크 스크립트의 새 theme 시나리오가 Windows 모드의 반대쪽 테마를 골라 설정 창 배경, 제목 표시줄, 팝업의 밝기와 재시작 후 유지를 확인한다.
+  완료는 CLAUDE.md의 검사 3개(x64 빌드, Core 테스트, 포맷 검사)와 Release MSIX 생성이 통과하는 상태다. 고대비 테마 대응, 팝업 색 사용자 지정은 이 계획 밖이다.
+approved: true
+max_attempts: 3
+ac_timeout_sec: 900
+steps:
+  - id: s1-theme-setting
+    title: let the settings window choose the app theme
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "구조 규칙", "테스트", "주의"), docs/PRD.md("4. 설정 창"), docs/ARCHITECTURE.md("레이어 규칙", "창과 셸 연동 (App)"),
+      `src/Soriseom.Core/AppSettings.cs`, `src/Soriseom.Core/AppLanguage.cs`, `tests/Soriseom.Core.Tests/AppSettingsTests.cs`,
+      `src/Soriseom.App/SettingsStore.cs`, `src/Soriseom.App/SettingsViewModel.cs`, `src/Soriseom.App/SettingsWindow.xaml`, `src/Soriseom.App/SettingsWindow.xaml.cs`,
+      `src/Soriseom.App/Strings/en-US/Resources.resw`, `src/Soriseom.App/Strings/ko-KR/Resources.resw`.
+
+      목표: 설정 창에 "앱 테마" 콤보 상자(시스템 설정 사용 / 밝게 / 어둡게)를 추가하고, 고른 값을 저장하며, 설정 창에 곧바로 적용한다. 팝업 적용은 다음 스텝 s2가 한다.
+      기본값은 시스템 설정 사용이며, 이때 동작은 지금과 같다(Windows의 앱 모드를 따름).
+
+      ## 1. `src/Soriseom.Core/AppTheme.cs` (새 파일)
+      ```csharp
+      namespace Soriseom.Core;
+
+      public enum AppTheme
+      {
+          System,
+          Light,
+          Dark,
+      }
+      ```
+      값의 순서를 바꾸지 마라. 이유: 설정 창 콤보 상자의 항목 순서와 `ThemeIndex`가 이 순서에 맞춰 캐스팅된다(`LanguageIndex`와 같은 방식).
+
+      ## 2. `src/Soriseom.Core/AppSettings.cs`
+      `HideWhenFullscreen`과 `Language` 사이에 속성을 추가한다: `public AppTheme Theme { get; init; } = AppTheme.System;`
+
+      ## 3. `tests/Soriseom.Core.Tests/AppSettingsTests.cs`
+      `DefaultsMatchSettingsSpecification`의 `Assert.True(settings.HideWhenFullscreen);` 다음 줄에 `Assert.Equal(AppTheme.System, settings.Theme);`를 추가한다. 다른 테스트는 고치지 마라.
+
+      ## 4. `src/Soriseom.App/SettingsStore.cs`
+      `Language`를 저장하고 읽는 방식을 그대로 따른다.
+      - `HideWhenFullscreenKey`와 `LanguageKey` 사이에 `private const string ThemeKey = "Theme";`
+      - `Update`: `values[HideWhenFullscreenKey] = ...;` 다음에 `values[ThemeKey] = settings.Theme.ToString();`
+      - `Load`: `LanguageKey`를 읽는 블록 바로 앞에, 같은 모양(문자열 → `Enum.TryParse` → `Enum.IsDefined`)으로 `Theme`을 읽는 블록을 추가한다.
+
+      ## 5. `src/Soriseom.App/SettingsViewModel.cs`
+      `PositionIndex`와 같은 방식으로 `ThemeIndex`를 추가한다.
+      - 생성자: `LanguageIndex = (int)store.Current.Language;` 바로 앞에 `ThemeIndex = (int)store.Current.Theme;`
+      - 속성: `LaunchAtStartup` 관련 속성들과 `LanguageIndex` 사이에 `[ObservableProperty] public partial int ThemeIndex { get; set; }`
+      - `OnThemeIndexChanged(int value)`: `(AppTheme)value`가 `Enum.IsDefined`일 때만 `_store.Update(_store.Current with { Theme = theme });`. 재시작 안내는 넣지 마라. 이유: 테마는 바로 적용된다.
+
+      ## 6. `src/Soriseom.App/AppThemeExtensions.cs` (새 파일)
+      설정 창과 팝업(s2)이 함께 쓰는 변환이다. 그대로 만든다.
+      ```csharp
+      using Microsoft.UI.Xaml;
+      using Soriseom.Core;
+
+      namespace Soriseom.App;
+
+      internal static class AppThemeExtensions
+      {
+          public static ElementTheme ToElementTheme(this AppTheme theme) => theme switch
+          {
+              AppTheme.Light => ElementTheme.Light,
+              AppTheme.Dark => ElementTheme.Dark,
+              _ => ElementTheme.Default,
+          };
+      }
+      ```
+
+      ## 7. `src/Soriseom.App/SettingsWindow.xaml`
+      - 루트 `ScrollViewer`에 `x:Name="ContentRoot"`와 `AutomationProperties.AutomationId="SettingsScrollViewer"`를 붙인다. 이유: 테마를 이 요소에 적용하고, 스텝 s3의 스모크가 이 ID로 창의 배경 위치를 찾는다.
+      - 언어 카드(`LanguageComboBox`가 든 `Border`) 바로 앞에 카드를 추가한다.
+      ```xml
+                  <Border Style="{StaticResource SettingsCardStyle}">
+                      <ComboBox
+                          x:Uid="ThemeComboBox"
+                          AutomationProperties.AutomationId="ThemeComboBox"
+                          SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
+                          <ComboBoxItem x:Uid="ThemeSystem" AutomationProperties.AutomationId="ThemeSystem" />
+                          <ComboBoxItem x:Uid="ThemeLight" AutomationProperties.AutomationId="ThemeLight" />
+                          <ComboBoxItem x:Uid="ThemeDark" AutomationProperties.AutomationId="ThemeDark" />
+                      </ComboBox>
+                  </Border>
+      ```
+
+      ## 8. `src/Soriseom.App/SettingsWindow.xaml.cs`
+      - `using Soriseom.Core;`를 정렬 순서에 맞게 추가한다.
+      - 생성자의 `AppWindow.Resize(...)` 다음에 다음을 넣는다.
+      ```csharp
+              ApplyTheme(store.Current.Theme);
+              store.Changed += (_, _) => ApplyTheme(store.Current.Theme);
+      ```
+      - private 메서드를 추가한다.
+      ```csharp
+          // The default title bar is drawn outside XAML, so it takes the theme separately.
+          private void ApplyTheme(AppTheme theme)
+          {
+              ContentRoot.RequestedTheme = theme.ToElementTheme();
+              AppWindow.TitleBar.PreferredTheme = theme switch
+              {
+                  AppTheme.Light => TitleBarTheme.Light,
+                  AppTheme.Dark => TitleBarTheme.Dark,
+                  _ => TitleBarTheme.UseDefaultAppMode,
+              };
+          }
+      ```
+      `TitleBarTheme`은 `Microsoft.UI.Windowing`에 있고 Windows App SDK 2.6.4 메타데이터에 있는 것을 확인했다.
+
+      ## 9. `.resw` 두 파일
+      `LanguageComboBox.Header` 항목 바로 앞에 네 항목을 추가한다. 기존 항목의 형식(`xml:space="preserve"`)을 따른다.
+      | name | en-US | ko-KR |
+      |---|---|---|
+      | `ThemeComboBox.Header` | App theme | 앱 테마 |
+      | `ThemeSystem.Content` | Use system setting | 시스템 설정 사용 |
+      | `ThemeLight.Content` | Light | 밝게 |
+      | `ThemeDark.Content` | Dark | 어둡게 |
+      ko-KR 파일은 UTF-8로 저장되어 있다. 인코딩을 바꾸지 마라.
+
+      ## 하지 말 것
+      - `Application.RequestedTheme`을 쓰지 마라. 이유: 앱이 시작된 뒤에는 바꿀 수 없어서 재시작 없이 적용할 수 없다.
+      - `MicaBackdrop`을 바꾸거나 테마별 백드롭 코드를 넣지 마라. 이유: `MicaBackdrop`은 기본 백드롭 구성을 쓰고, 그 테마는 창 루트 요소의 테마를 따른다. 계획 마무리 때 스모크로 확인한다.
+      - `ExtendsContentIntoTitleBar`를 켜거나 사용자 지정 제목 표시줄을 만들지 마라. 이유: 기본 제목 표시줄을 `PreferredTheme`로 맞추면 된다.
+      - `PopupWindow`, `PopupController`, `PopupAcrylicBackdrop`, `TrayController`를 고치지 마라. 이유: 팝업은 s2에서 적용하고, 트레이 아이콘은 계속 작업 표시줄 테마를 따른다.
+      - `docs/`, `PRIVACY.md`, `tools/smoke/`, CLAUDE.md를 고치지 마라. 이유: 문서는 s2, 스모크는 s3에서 바꾼다.
+      - NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.Core/AppTheme.cs
+      - src/Soriseom.Core/AppSettings.cs
+      - tests/Soriseom.Core.Tests/AppSettingsTests.cs
+      - src/Soriseom.App/AppThemeExtensions.cs
+      - src/Soriseom.App/SettingsStore.cs
+      - src/Soriseom.App/SettingsViewModel.cs
+      - src/Soriseom.App/SettingsWindow.xaml
+      - src/Soriseom.App/SettingsWindow.xaml.cs
+      - src/Soriseom.App/Strings/en-US/Resources.resw
+      - src/Soriseom.App/Strings/ko-KR/Resources.resw
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests --filter-method "*.AppSettingsTests.DefaultsMatchSettingsSpecification"'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'git grep -q "SettingsScrollViewer" -- src/Soriseom.App/SettingsWindow.xaml'
+      - 'git grep -q "ThemeDark.Content" -- src/Soriseom.App/Strings/en-US/Resources.resw'
+      - 'git grep -q "ThemeDark.Content" -- src/Soriseom.App/Strings/ko-KR/Resources.resw'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s2-popup-theme
+    title: show the popup in the chosen app theme
+    type: feat
+    scope: app
+    description: |
+      먼저 읽을 파일: CLAUDE.md("C# 규칙", "주의"), docs/PRD.md("2. 팝업 모양과 동작", "4. 설정 창"), docs/ARCHITECTURE.md("창과 셸 연동 (App)", "횡단 관심사"의 설정 저장),
+      `src/Soriseom.App/AppThemeExtensions.cs`와 `src/Soriseom.App/SettingsWindow.xaml.cs`(이전 스텝이 만든 테마 적용 방식), `src/Soriseom.App/PopupWindow.xaml`, `src/Soriseom.App/PopupWindow.xaml.cs`,
+      `src/Soriseom.App/PopupController.cs`, `src/Soriseom.App/PopupAcrylicBackdrop.cs`, `PRIVACY.md`, `docs/store-listing.md`.
+
+      목표: 팝업도 설정의 앱 테마를 쓰게 하고, 설정이 바뀌면 다음 팝업을 기다리지 않고 곧바로 적용한다. 앱 테마 기능을 문서에 반영한다.
+
+      ## 1. `src/Soriseom.App/PopupWindow.xaml`
+      루트 `Grid`(`Background="Transparent"`)에 `x:Name="ContentRoot"`를 붙인다.
+
+      ## 2. `src/Soriseom.App/PopupWindow.xaml.cs`
+      `UpdateThumbnail` 앞에 public 메서드를 추가한다. 본문은 `ContentRoot.RequestedTheme = theme.ToElementTheme();` 한 줄이다. 파일의 다른 메서드처럼 블록 본문으로 쓴다.
+      `public void ApplyTheme(AppTheme theme)`
+
+      ## 3. `src/Soriseom.App/PopupController.cs`
+      생성자의 `_store = store;` 다음에 다음 두 줄을 넣는다.
+      ```csharp
+              _window.ApplyTheme(store.Current.Theme);
+              store.Changed += (_, _) => _window.ApplyTheme(_store.Current.Theme);
+      ```
+      - `ShowTrack`에 테마 인자를 넣지 마라. 이유: 표시 직전에 테마를 바꾸면 Acrylic 틴트가 한 프레임 늦게 바뀔 수 있다. 설정이 바뀔 때 미리 적용한다.
+      - 같은 값으로 다시 설정해도 `RequestedTheme`은 아무 일도 하지 않으므로 이전 값을 비교하는 필드를 두지 마라.
+
+      ## 4. `PopupAcrylicBackdrop.cs`와 `TransparentBackdrop.cs`는 고치지 마라
+      이유: `PopupAcrylicBackdrop`은 `OnDefaultSystemBackdropConfigurationChanged`에서 기본 백드롭 구성의 `Theme`을 읽어 틴트와 농도를 다시 넣는다. 그 테마가 창 루트 요소의 테마를 따르므로 루트의 `RequestedTheme`만 바꾸면 된다.
+      `TransparentBackdrop`은 테마 변경을 일부러 무시한다. 실제 동작은 계획 마무리 때 스모크(theme 시나리오)로 확인하고, 어긋나면 새 스텝에서 고친다.
+
+      ## 5. `docs/PRD.md`
+      - "2. 팝업 모양과 동작"에서 "Acrylic 반투명 배경에 알약 모양을 쓰고 시스템 라이트/다크 테마를 따릅니다."를 "Acrylic 반투명 배경에 알약 모양을 쓰고 설정의 앱 테마(라이트/다크, 기본은 시스템 설정)를 따릅니다."로 바꾼다.
+      - "4. 설정 창" 표에서 `| 언어 |` 행 바로 앞에 `| 앱 테마 | 시스템 / 라이트 / 다크 | 시스템 |` 행을 추가한다.
+      - 표 아래 "- 바꾼 설정은 저장 버튼 없이 ..." 항목 다음에 항목을 추가한다:
+        `- 앱 테마는 팝업과 설정 창에 적용합니다. 트레이 아이콘은 작업 표시줄 색에 맞춰야 하므로 앱 테마와 상관없이 작업 표시줄 테마를 따릅니다.`
+      - 다른 줄은 고치지 마라. "범위 밖" 절의 Edge 항목도 그대로 둔다.
+
+      ## 6. `docs/ARCHITECTURE.md`
+      "창과 셸 연동 (App)"에서 **팝업 창** 항목과 **트레이** 항목 사이에 항목을 추가한다.
+      `- **앱 테마**: 설정의 앱 테마를 팝업과 설정 창의 루트 요소 `RequestedTheme`으로 적용하고, 설정이 바뀌면 곧바로 다시 적용합니다. 시스템 설정이면 `ElementTheme.Default`로 Windows의 앱 모드를 따릅니다. `Application.RequestedTheme`은 앱이 시작된 뒤 바꿀 수 없어 쓰지 않습니다. 설정 창의 Mica와 팝업의 Acrylic은 기본 백드롭 구성의 테마를 쓰고, 이 테마가 창 루트 요소의 테마를 따라갑니다. 설정 창의 기본 제목 표시줄은 XAML 밖에서 그려지므로 `AppWindow.TitleBar.PreferredTheme`로 따로 맞춥니다(시스템 설정이면 `UseDefaultAppMode`).`
+
+      ## 7. `PRIVACY.md`
+      저장하는 설정 목록에 앱 테마를 더한다(Store 정책 10.5.1, docs/ARCHITECTURE.md "설정 저장").
+      - 한국어: "표시 시간, 위치, 크기, 전체화면일 때 숨기기, 언어 설정과"를 "표시 시간, 위치, 크기, 전체화면일 때 숨기기, 앱 테마, 언어 설정과"로 바꾼다.
+      - 영어: "hide-when-fullscreen preference, and language setting,"을 "hide-when-fullscreen preference, app theme, and language setting,"으로 바꾼다.
+      - "최종 수정일: 2026-11-04"와 "Last updated: 2026-11-04"를 2026-11-06으로 바꾼다.
+
+      ## 8. `docs/store-listing.md`
+      Store에 붙여 넣을 문구가 실제 동작과 맞도록 테마 문장만 바꾼다. 다른 문장, 체크리스트, 스크린샷 캡션은 고치지 마라.
+      - ko-KR Description 둘째 문단의 "팝업은 주 모니터에 알약 모양으로 표시하며 시스템 라이트·다크 테마를 따릅니다."를 "팝업은 주 모니터에 알약 모양으로 표시합니다. 테마는 기본으로 Windows의 밝게·어둡게 모드를 따르며, 설정에서 직접 고를 수 있습니다."로 바꾼다.
+      - ko-KR Product features의 "시스템 라이트·다크 테마에 맞춘 알약 모양으로 표시합니다."를 "알약 모양으로 표시하며 밝게·어둡게 테마를 고르거나 Windows 모드를 따릅니다."로 바꾼다.
+      - en-US Description 둘째 문단의 "The pill-shaped popup appears on your primary monitor and follows your system's light or dark theme."를 "The pill-shaped popup appears on your primary monitor. It follows your Windows light or dark mode by default, or you can choose a theme in settings."로 바꾼다.
+      - en-US Product features의 "Matches your system's light or dark theme with a pill-shaped popup"을 "Shows a pill-shaped popup in light or dark, following Windows or your choice"로 바꾼다.
+
+      ## 하지 말 것
+      - `TrayController`를 고치지 마라. 이유: 트레이 아이콘은 작업 표시줄 테마를 따른다.
+      - `tools/smoke/`, CLAUDE.md, `docs/ADR.md`를 고치지 마라. 이유: 다음 스텝 s3에서 바꾼다.
+      - Core, 설정 창, `.resw`를 고치지 마라. 이유: 이전 스텝에서 끝났다.
+      - NuGet 패키지를 추가하지 마라. 앱을 실행하지 마라(CLAUDE.md "주의").
+    expected_files:
+      - src/Soriseom.App/PopupWindow.xaml
+      - src/Soriseom.App/PopupWindow.xaml.cs
+      - src/Soriseom.App/PopupController.cs
+      - docs/PRD.md
+      - docs/ARCHITECTURE.md
+      - PRIVACY.md
+      - docs/store-listing.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'git grep -q "_window.ApplyTheme(store.Current.Theme)" -- src/Soriseom.App/PopupController.cs'
+      - 'git grep -q "PreferredTheme" -- docs/ARCHITECTURE.md'
+      - 'git grep -q "app theme, and language setting" -- PRIVACY.md'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
+
+  - id: s3-smoke-theme
+    title: check the app theme in the smoke script
+    type: feat
+    scope: tools
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "그 밖의 명령"과 "주의"), docs/ADR.md(ADR-009), `tools/smoke/Smoke.ps1` 전체, `src/Soriseom.App/SettingsWindow.xaml`(AutomationId `SettingsScrollViewer`, `ThemeComboBox`, `ThemeSystem`, `ThemeLight`, `ThemeDark`).
+
+      목표: 스모크 스크립트에 theme 시나리오를 추가한다. Windows 앱 모드의 반대쪽 테마를 골라(시스템을 따라서는 통과할 수 없게) 설정 창의 배경과 제목 표시줄, 팝업이 그 테마로 바뀌는지, 재시작 뒤에도 유지되는지,
+      시스템 설정 사용으로 돌리면 다시 Windows 모드를 따르는지 확인한다. 밝기는 Rec. 709 luma(0~255)로 보고 128을 경계로 한다. 밝은 테마의 표면은 약 190 이상, 어두운 테마는 약 90 이하라 여유가 크다.
+
+      ## 1. `tools/smoke/Smoke.ps1`: 기존 함수 정리
+      - `Save-Screenshot`을 아래 두 함수로 바꾼다. 원래 주석 "Settings windows carry an invisible resize border ..."는 `Get-WindowBitmap` 위로 옮긴다. 이유: 테마 검사가 파일을 저장하지 않고 같은 PrintWindow 이미지를 읽는다.
+      ```powershell
+      # PrintWindow renders the window even when another window covers it.
+      # Settings windows carry an invisible resize border that it renders as black bands on three sides.
+      function Get-WindowBitmap($Window) {
+          $handle = [IntPtr]$Window.Current.NativeWindowHandle
+          $rect = [SmokeNative+RECT]::new()
+          [void][SmokeNative]::GetWindowRect($handle, [ref]$rect)
+          $bitmap = [System.Drawing.Bitmap]::new($rect.Right - $rect.Left, $rect.Bottom - $rect.Top)
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $hdc = $graphics.GetHdc()
+          [void][SmokeNative]::PrintWindow($handle, $hdc, 2)
+          $graphics.ReleaseHdc($hdc)
+          $graphics.Dispose()
+          return $bitmap
+      }
+
+      function Save-Screenshot($Window, [string] $Name) {
+          $bitmap = Get-WindowBitmap $Window
+          $path = Join-Path $OutDir "$Name.png"
+          $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+          $bitmap.Dispose()
+          Write-Line "screenshot $path"
+      }
+      ```
+      - `Select-Language([string] $ItemId)`를 `Select-ComboBoxItem([string] $ComboBoxId, [string] $ItemId)`로 바꾼다. 본문의 `'LanguageComboBox'` 세 곳을 `$ComboBoxId`로, 예외 메시지의 "language item"을 "combo box item"으로 바꾼다. 다른 줄은 그대로 둔다.
+        `Test-Language`의 호출 네 곳을 `Select-ComboBoxItem 'LanguageComboBox' <원래 인자>`로 바꾼다. 이유: 테마 콤보 상자도 같은 조작이 필요하다.
+
+      ## 2. `tools/smoke/Smoke.ps1`: theme 시나리오
+      `Test-PopupSize` 다음, `Test-DoNotDisturb` 앞에 아래 함수들을 그대로 추가한다. 이 코드는 PowerShell 파서로 문법을 확인했다.
+      ```powershell
+      # Windows apps follow this mode. The taskbar and the tray icon follow SystemUsesLightTheme instead.
+      function Test-AppsUseLightTheme {
+          $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+          # Windows starts in light mode, so a missing value means light.
+          return $null -eq $key.AppsUseLightTheme -or $key.AppsUseLightTheme -ne 0
+      }
+
+      # Rec. 709 luma from 0 to 255. Light and dark theme surfaces land far on either side of 128.
+      function Get-Luma($Pixel) {
+          return 0.2126 * $Pixel.R + 0.7152 * $Pixel.G + 0.0722 * $Pixel.B
+      }
+
+      # The middle of the title bar, and the left padding of the content halfway down, which no card covers at any scroll position.
+      # PrintWindow puts the top left corner of the window rect at 0,0.
+      function Get-SettingsWindowLuma {
+          $window = Get-SettingsWindow
+          $rect = [SmokeNative+RECT]::new()
+          [void][SmokeNative]::GetWindowRect([IntPtr]$window.Current.NativeWindowHandle, [ref]$rect)
+          $content = (Find-Id $window 'SettingsScrollViewer').Current.BoundingRectangle
+          $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+          $bitmap = Get-WindowBitmap $window
+          try {
+              return @{
+                  TitleBar = Get-Luma ($bitmap.GetPixel([int](($content.Left + $content.Right) / 2 - $rect.Left), [int](($content.Top - $rect.Top) / 2)))
+                  Background = Get-Luma ($bitmap.GetPixel([int]($content.Left + 12 * $dpiScale - $rect.Left), [int]($content.Top + $content.Height / 2 - $rect.Top)))
+              }
+          } finally {
+              $bitmap.Dispose()
+          }
+      }
+
+      # Waits because the theme can land a frame after the choice. Windows draws the title bar outside XAML, so it is checked on its own.
+      function Assert-SettingsTheme([string] $Name, [bool] $Light, [string] $ScreenshotName) {
+          $script:SettingsLuma = $null
+          [void](Wait-For {
+              $script:SettingsLuma = Get-SettingsWindowLuma
+              (($script:SettingsLuma.Background -ge 128) -eq $Light) -and (($script:SettingsLuma.TitleBar -ge 128) -eq $Light)
+          })
+          Save-Screenshot (Get-SettingsWindow) $ScreenshotName
+          $luma = $script:SettingsLuma
+          if (-not $luma) {
+              Check $Name $false 'the settings window could not be read'
+              return
+          }
+
+          Check $Name (($luma.Background -ge 128) -eq $Light) "background luma $([int]$luma.Background)"
+          Check "$Name, title bar included" (($luma.TitleBar -ge 128) -eq $Light) "title bar luma $([int]$luma.TitleBar)"
+      }
+
+      # The pixels of the acrylic check, above the text and right of the album art, averaged over both colors of the band.
+      function Get-PopupLuma([string] $ScreenshotName) {
+          $path = Join-Path $OutDir "$ScreenshotName.png"
+          if (-not (Test-Path $path)) { return $null }
+
+          $bitmap = [System.Drawing.Bitmap]::new($path)
+          try {
+              $row = [int]($bitmap.Height * 0.12)
+              $left = Get-Luma ($bitmap.GetPixel([int]($bitmap.Width * 0.25), $row))
+              $right = Get-Luma ($bitmap.GetPixel([int]($bitmap.Width * 0.75), $row))
+              return ($left + $right) / 2
+          } finally {
+              $bitmap.Dispose()
+          }
+      }
+
+      # Chooses the mode Windows is not in, so the check cannot pass by following Windows.
+      function Test-Theme {
+          $systemLight = Test-AppsUseLightTheme
+          $chosenLight = -not $systemLight
+          $systemName = if ($systemLight) { 'light' } else { 'dark' }
+          $chosenName = if ($chosenLight) { 'light' } else { 'dark' }
+          $chosenItem = if ($chosenLight) { 'ThemeLight' } else { 'ThemeDark' }
+
+          Open-Settings
+          Assert-SettingsTheme "the settings window follows the $systemName Windows mode by default" $systemLight 'theme-default'
+          Select-ComboBoxItem 'ThemeComboBox' $chosenItem
+          Assert-SettingsTheme "choosing $chosenName applies to the settings window right away" $chosenLight 'theme-chosen'
+
+          $tracks = Watch-FixtureTracks 'popup-theme'
+          if ($tracks) {
+              Check 'a track change shows the popup in the chosen theme' $tracks.First.Shown
+              if ($tracks.First.Shown) {
+                  $luma = Get-PopupLuma 'popup-theme'
+                  Check "the popup uses the $chosenName theme" ($null -ne $luma -and ($luma -ge 128) -eq $chosenLight) "luma $luma"
+              }
+          }
+
+          Restart-App
+          Assert-SettingsTheme "the $chosenName theme stays after a restart" $chosenLight 'theme-restarted'
+          Select-ComboBoxItem 'ThemeComboBox' 'ThemeSystem'
+          Assert-SettingsTheme "choosing the system setting follows the $systemName Windows mode again" $systemLight 'theme-system'
+      }
+      ```
+      - `Wait-For`에 넘기는 스크립트 블록 안에서 `$value`, `$watch`, `$Condition`, `$TimeoutMs`라는 이름을 쓰지 마라. 이유: PowerShell 변수는 대소문자를 구분하지 않고 동적 스코프라 `Wait-For`의 변수와 섞인다.
+      - 결과를 `$script:SettingsLuma`에 담는 방식을 바꾸지 마라. 이유: 스크립트 블록 안에서 만든 지역 변수는 블록이 끝나면 사라진다.
+      - `Test-Theme`이 마지막에 시스템 설정 사용으로 돌려놓는 순서를 바꾸지 마라. 이유: 뒤의 dnd, tray 시나리오가 기본 설정을 전제로 한다.
+      - Windows 모드(`AppsUseLightTheme`, `SystemUsesLightTheme`)를 바꾸지 마라. 이유: 화면 전체가 바뀐다(ADR-009). 고르는 쪽은 앱 테마만이다.
+
+      ## 3. `tools/smoke/Smoke.ps1`: 시나리오 등록
+      - `.PARAMETER Scenario`의 목록과 `param`의 `$Scenario` 기본값에서 `popupsize`와 `dnd` 사이에 `theme`을 넣는다.
+      - `$scenarios`의 `popupsize = { Test-PopupSize }` 다음 줄에 `theme = { Test-Theme }`을 넣는다.
+
+      ## 4. `CLAUDE.md`
+      "그 밖의 명령" 표의 앱 실행 확인 명령에서 시나리오 목록을 `launch,relaunch,startup,language,media,popupsize,theme,dnd,tray`로 바꾼다. 다른 줄은 고치지 마라.
+
+      ## 5. `docs/ADR.md` ADR-009
+      "스크립트가 못 보는 항목(사람이 확인)"의 "작업 표시줄 테마 전환" 항목에서 마지막 문장 "이때 앱이 종료되지 않는지, 팝업 색이 Windows 모드를 따르는지도 확인합니다."를 다음으로 바꾼다.
+      `이때 앱이 종료되지 않는지, 앱 테마가 "시스템 설정 사용"일 때 팝업과 설정 창 색이 바뀐 Windows 모드를 따르는지도 확인합니다. 밝게·어둡게를 고른 경우는 theme 시나리오가 Windows 모드의 반대쪽을 골라 설정 창의 배경과 제목 표시줄, 팝업의 밝기로 확인합니다.`
+
+      ## 하지 말 것
+      - 스크립트의 출력에 곡 제목을 남기지 마라. 이유: ADR-009.
+      - App, Core, 테스트, docs/PRD.md, docs/ARCHITECTURE.md를 고치지 마라. NuGet 패키지를 추가하지 마라.
+      - 앱과 스크립트를 실행하지 마라(CLAUDE.md "주의"). 스모크는 계획을 마무리할 때 Claude가 돌린다.
+    expected_files:
+      - tools/smoke/Smoke.ps1
+      - CLAUDE.md
+      - docs/ADR.md
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/Smoke.ps1"'
+      - 'git grep -q "theme = { Test-Theme }" -- tools/smoke/Smoke.ps1'
+      - 'git grep -q "Select-ComboBoxItem .LanguageComboBox. .LanguageSystem." -- tools/smoke/Smoke.ps1'
+      - 'git grep -q "popupsize,theme,dnd,tray" -- CLAUDE.md'
