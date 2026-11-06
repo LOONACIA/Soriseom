@@ -3,7 +3,7 @@
     x:Class="Soriseom.App.PopupWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid Background="Transparent">
+    <Grid x:Name="ContentRoot" Background="Transparent">
         <Viewbox>
             <Grid x:Name="Island" Width="360" Height="80">
                 <Grid x:Name="IslandSurface" Width="80" HorizontalAlignment="Center">

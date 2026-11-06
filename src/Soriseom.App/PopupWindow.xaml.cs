@@ -148,6 +148,11 @@ public sealed partial class PopupWindow : Window
         _ = LoadThumbnailAsync(thumbnail);
     }
 
+    public void ApplyTheme(AppTheme theme)
+    {
+        ContentRoot.RequestedTheme = theme.ToElementTheme();
+    }
+
     public void UpdateThumbnail(IRandomAccessStreamReference? thumbnail)
     {
         _ = LoadThumbnailAsync(thumbnail);

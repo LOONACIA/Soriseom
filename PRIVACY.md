@@ -15,7 +15,7 @@
 
 ### 기기에 저장하는 정보
 
-표시 시간, 위치, 크기, 전체화면일 때 숨기기, 언어 설정과 지금까지 감지된 미디어 앱의 식별자 및 앱별 켜기/끄기를 저장합니다.
+표시 시간, 위치, 크기, 전체화면일 때 숨기기, 앱 테마, 언어 설정과 지금까지 감지된 미디어 앱의 식별자 및 앱별 켜기/끄기를 저장합니다.
 
 이 정보는 Windows의 앱 전용 데이터 영역에 저장하며, 앱에서 별도로 암호화하지 않습니다. 로그인 시 자동 실행 여부는 Windows가 관리합니다.
 
@@ -43,7 +43,7 @@
 
 [GitHub Issues](https://github.com/LOONACIA/Soriseom/issues)로 문의해 주세요. 공개 게시판이므로 개인정보를 적지 마세요.
 
-최종 수정일: 2026-11-04
+최종 수정일: 2026-11-06
 
 ## English
 
@@ -58,7 +58,7 @@ Soriseom reads track information only on your device to briefly show it on scree
 
 ### Information saved on your device
 
-Soriseom saves your display duration, position, size, hide-when-fullscreen preference, and language setting, along with the identifiers of media apps detected so far and their individual on/off settings.
+Soriseom saves your display duration, position, size, hide-when-fullscreen preference, app theme, and language setting, along with the identifiers of media apps detected so far and their individual on/off settings.
 
 This information is stored in the app's dedicated data area in Windows. The app does not encrypt it separately. Windows manages whether the app starts automatically when you sign in.
 
@@ -86,4 +86,4 @@ If the information the app reads or saves changes, this document and its last up
 
 Please use [GitHub Issues](https://github.com/LOONACIA/Soriseom/issues) for questions. This is a public forum, so please do not include personal information.
 
-Last updated: 2026-11-04
+Last updated: 2026-11-06

@@ -101,7 +101,7 @@ IARC 설문은 첫 질문에서 고른 앱 분류에 따라 문항이 달라지�
 ```text
 소리섬은 창을 전환하지 않고 지금 나오는 곡을 확인하도록 도와줍니다. 곡이 바뀌면 제목, 아티스트, 앨범아트를 몇 초간 표시한 뒤 사라집니다. 앨범아트가 없으면 음표 아이콘으로 표시합니다.
 
-팝업은 주 모니터에 알약 모양으로 표시하며 시스템 라이트·다크 테마를 따릅니다. 클릭을 뒤의 창으로 전달하고 입력 중인 창의 포커스를 유지합니다. 작업 표시줄과 Alt+Tab 목록에는 나타나지 않습니다.
+팝업은 주 모니터에 알약 모양으로 표시합니다. 테마는 기본으로 Windows의 밝게·어둡게 모드를 따르며, 설정에서 직접 고를 수 있습니다. 클릭을 뒤의 창으로 전달하고 입력 중인 창의 포커스를 유지합니다. 작업 표시줄과 Alt+Tab 목록에는 나타나지 않습니다.
 
 표시 시간은 2~10초, 위치는 위·아래의 왼쪽·가운데·오른쪽 6곳, 크기는 70~100%로 설정합니다. 기본값은 4초, 위쪽 가운데, 90%입니다. 앱별로 팝업을 켜거나 끄고, 바꾼 설정은 바로 저장하고 적용합니다. 언어 변경에는 재시작이 필요합니다.
 
@@ -124,7 +124,7 @@ Windows 10 1809 이상과 Windows 11을 대상으로 하며 한국어와 영어 
 곡이 바뀌면 제목, 아티스트, 앨범아트를 잠깐 표시합니다.
 클릭을 뒤의 창으로 전달하고 작업 중인 창의 포커스를 유지합니다.
 표시 시간 2~10초, 위치 6곳, 크기 70~100%를 설정합니다.
-시스템 라이트·다크 테마에 맞춘 알약 모양으로 표시합니다.
+알약 모양으로 표시하며 밝게·어둡게 테마를 고르거나 Windows 모드를 따릅니다.
 앱별로 팝업을 켜거나 끄고 전체화면일 때 숨기기를 설정합니다.
 트레이에 상주하며 로그인 시 자동 실행을 켜거나 끄도록 지원합니다.
 한국어와 영어 UI를 제공합니다.
@@ -162,7 +162,7 @@ Keep track of your music while you work with a pill-shaped popup for each new tr
 ```text
 See what's playing without switching windows. Soriseom briefly shows the title, artist, and album art when the track changes, then disappears. If no album art is available, it shows a music note icon.
 
-The pill-shaped popup appears on your primary monitor and follows your system's light or dark theme. Clicks pass through to the window behind it, and your current window keeps focus. The popup stays out of the taskbar and Alt+Tab.
+The pill-shaped popup appears on your primary monitor. It follows your Windows light or dark mode by default, or you can choose a theme in settings. Clicks pass through to the window behind it, and your current window keeps focus. The popup stays out of the taskbar and Alt+Tab.
 
 Choose a display time of 2 to 10 seconds, one of six positions across the top or bottom of the screen, and a size from 70% to 100%. The defaults are 4 seconds, top center, and 90%. Turn popups on or off for each app. Settings are saved and applied as you change them; changing the UI language requires a restart.
 
@@ -185,7 +185,7 @@ Designed for Windows 10 version 1809 or later and Windows 11, with a Korean and 
 Briefly displays the title, artist, and album art when the track changes
 Lets clicks pass through and keeps focus on your current window
 Offers a 2 to 10 second display time, six positions, and 70% to 100% sizing
-Matches your system's light or dark theme with a pill-shaped popup
+Shows a pill-shaped popup in light or dark, following Windows or your choice
 Lets you enable popups per app and choose whether to hide them during fullscreen use
 Runs in the system tray with optional startup when you sign in
 Includes Korean and English interfaces

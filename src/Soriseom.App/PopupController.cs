@@ -27,6 +27,8 @@ internal sealed class PopupController
         _decider = new PopupDecider();
         _window = new PopupWindow();
         _store = store;
+        _window.ApplyTheme(store.Current.Theme);
+        store.Changed += (_, _) => _window.ApplyTheme(_store.Current.Theme);
         _reevaluateTimer = dispatcherQueue.CreateTimer();
         _reevaluateTimer.IsRepeating = false;
         _reevaluateTimer.Tick += (_, _) =>
