@@ -11,6 +11,7 @@ internal sealed class SettingsStore
     private const string PositionKey = "Position";
     private const string PopupSizePercentKey = "PopupSizePercent";
     private const string HideWhenFullscreenKey = "HideWhenFullscreen";
+    private const string ThemeKey = "Theme";
     private const string LanguageKey = "Language";
     private const string AppsContainerName = "Apps";
 
@@ -38,6 +39,7 @@ internal sealed class SettingsStore
             values[PositionKey] = settings.Position.ToString();
             values[PopupSizePercentKey] = settings.PopupSizePercent;
             values[HideWhenFullscreenKey] = settings.HideWhenFullscreen;
+            values[ThemeKey] = settings.Theme.ToString();
             values[LanguageKey] = settings.Language.ToString();
             var appsValues = ApplicationData.Current.LocalSettings.CreateContainer(AppsContainerName, ApplicationDataCreateDisposition.Always).Values;
             foreach (var (appId, enabled) in settings.Apps)
@@ -78,6 +80,12 @@ internal sealed class SettingsStore
             if (values.TryGetValue(HideWhenFullscreenKey, out var fullscreenValue) && fullscreenValue is bool hideWhenFullscreen)
             {
                 settings = settings with { HideWhenFullscreen = hideWhenFullscreen };
+            }
+
+            if (values.TryGetValue(ThemeKey, out var themeValue) && themeValue is string themeText
+                && Enum.TryParse(themeText, out AppTheme theme) && Enum.IsDefined(theme))
+            {
+                settings = settings with { Theme = theme };
             }
 
             if (values.TryGetValue(LanguageKey, out var languageValue) && languageValue is string languageText

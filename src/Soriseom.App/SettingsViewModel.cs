@@ -20,6 +20,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         PositionIndex = (int)store.Current.Position;
         PopupSizePercent = store.Current.PopupSizePercent;
         HideWhenFullscreen = store.Current.HideWhenFullscreen;
+        ThemeIndex = (int)store.Current.Theme;
         LanguageIndex = (int)store.Current.Language;
         foreach (var (appId, displayName, enabled) in store.Current.Apps
             .Select(app => (app.Key, DisplayName: AppDisplayName.Resolve(app.Key), app.Value))
@@ -61,6 +62,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool ShowStartupNotice { get; set; }
+
+    [ObservableProperty]
+    public partial int ThemeIndex { get; set; }
 
     [ObservableProperty]
     public partial int LanguageIndex { get; set; }
@@ -105,6 +109,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
 
         _ = SetLaunchAtStartupAsync(value);
+    }
+
+    partial void OnThemeIndexChanged(int value)
+    {
+        var theme = (AppTheme)value;
+        if (Enum.IsDefined(theme))
+        {
+            _store.Update(_store.Current with { Theme = theme });
+        }
     }
 
     partial void OnLanguageIndexChanged(int value)

@@ -27,6 +27,8 @@ public sealed record AppSettings
 
     public bool HideWhenFullscreen { get; init; } = true;
 
+    public AppTheme Theme { get; init; } = AppTheme.System;
+
     public AppLanguage Language { get; init; } = AppLanguage.System;
 
     public ImmutableDictionary<string, bool> Apps { get; init; } = ImmutableDictionary<string, bool>.Empty;

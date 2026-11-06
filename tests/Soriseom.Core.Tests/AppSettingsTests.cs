@@ -19,6 +19,7 @@ public class AppSettingsTests
         Assert.Equal(90, settings.PopupSizePercent);
         Assert.Equal(PopupPosition.TopCenter, settings.Position);
         Assert.True(settings.HideWhenFullscreen);
+        Assert.Equal(AppTheme.System, settings.Theme);
         Assert.Equal(AppLanguage.System, settings.Language);
         Assert.Empty(settings.Apps);
     }

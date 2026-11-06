@@ -9,7 +9,7 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <ScrollViewer>
+    <ScrollViewer x:Name="ContentRoot" AutomationProperties.AutomationId="SettingsScrollViewer">
         <StackPanel Padding="24" Spacing="8">
             <StackPanel.Resources>
                 <Style x:Key="SettingsCardStyle" TargetType="Border">
@@ -80,6 +80,16 @@
                         TextWrapping="Wrap"
                         Visibility="{x:Bind ViewModel.ShowStartupNotice, Mode=OneWay}" />
                 </StackPanel>
+            </Border>
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <ComboBox
+                    x:Uid="ThemeComboBox"
+                    AutomationProperties.AutomationId="ThemeComboBox"
+                    SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
+                    <ComboBoxItem x:Uid="ThemeSystem" AutomationProperties.AutomationId="ThemeSystem" />
+                    <ComboBoxItem x:Uid="ThemeLight" AutomationProperties.AutomationId="ThemeLight" />
+                    <ComboBoxItem x:Uid="ThemeDark" AutomationProperties.AutomationId="ThemeDark" />
+                </ComboBox>
             </Border>
             <Border Style="{StaticResource SettingsCardStyle}">
                 <StackPanel Spacing="4">

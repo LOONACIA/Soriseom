@@ -106,6 +106,18 @@
   <data name="LaunchAtStartupNotice.Text" xml:space="preserve">
     <value>Windows manages this setting. You can change it in Settings &gt; Apps &gt; Startup or on the Startup apps tab in Task Manager.</value>
   </data>
+  <data name="ThemeComboBox.Header" xml:space="preserve">
+    <value>App theme</value>
+  </data>
+  <data name="ThemeSystem.Content" xml:space="preserve">
+    <value>Use system setting</value>
+  </data>
+  <data name="ThemeLight.Content" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="ThemeDark.Content" xml:space="preserve">
+    <value>Dark</value>
+  </data>
   <data name="LanguageComboBox.Header" xml:space="preserve">
     <value>Language</value>
   </data>
