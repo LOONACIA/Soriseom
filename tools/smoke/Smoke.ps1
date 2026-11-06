@@ -16,7 +16,7 @@
     (locked, full-screen, do not disturb, or other media playback holds the current session), which says nothing about the code.
 
 .PARAMETER Scenario
-    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, dnd, tray, storeshots.
+    Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, theme, dnd, tray, storeshots.
     storeshots generates Store screenshots and is not included in the default list.
 
 .PARAMETER Configuration
@@ -33,7 +33,7 @@
     pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Scenario language,media
 #>
 param(
-    [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,dnd,tray',
+    [string] $Scenario = 'launch,relaunch,startup,language,media,popupsize,theme,dnd,tray',
     [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Debug',
     [switch] $AfterSignIn,
     [string] $OutDir
@@ -393,8 +393,9 @@ function Get-Resource([string] $Culture, [string] $Name) {
     ($resources.root.data | Where-Object name -EQ $Name).value
 }
 
-# Settings windows carry an invisible resize border that PrintWindow renders as black bands on three sides.
-function Save-Screenshot($Window, [string] $Name) {
+# PrintWindow renders the window even when another window covers it.
+# Settings windows carry an invisible resize border that it renders as black bands on three sides.
+function Get-WindowBitmap($Window) {
     $handle = [IntPtr]$Window.Current.NativeWindowHandle
     $rect = [SmokeNative+RECT]::new()
     [void][SmokeNative]::GetWindowRect($handle, [ref]$rect)
@@ -404,6 +405,11 @@ function Save-Screenshot($Window, [string] $Name) {
     [void][SmokeNative]::PrintWindow($handle, $hdc, 2)
     $graphics.ReleaseHdc($hdc)
     $graphics.Dispose()
+    return $bitmap
+}
+
+function Save-Screenshot($Window, [string] $Name) {
+    $bitmap = Get-WindowBitmap $Window
     $path = Join-Path $OutDir "$Name.png"
     $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     $bitmap.Dispose()
@@ -492,19 +498,19 @@ function Test-Startup {
     Check 'an enabled task hides the notice' ([bool](Wait-For { -not (Get-SettingsElement 'LaunchAtStartupNotice') }))
 }
 
-function Select-Language([string] $ItemId) {
-    $combo = Get-SettingsElement 'LanguageComboBox'
+function Select-ComboBoxItem([string] $ComboBoxId, [string] $ItemId) {
+    $combo = Get-SettingsElement $ComboBoxId
     $combo.GetCurrentPattern($ExpandPattern).Expand()
     $item = Wait-For { Find-Id $combo $ItemId }
-    if (-not $item) { throw "language item $ItemId did not appear" }
+    if (-not $item) { throw "combo box item $ItemId did not appear" }
     $item.GetCurrentPattern($SelectionItemPattern).Select()
     $isSelected = {
-        $selection = (Get-SettingsElement 'LanguageComboBox').GetCurrentPattern($SelectionPattern).Current.GetSelection()
+        $selection = (Get-SettingsElement $ComboBoxId).GetCurrentPattern($SelectionPattern).Current.GetSelection()
         $selection.Count -eq 1 -and $selection[0].Current.AutomationId -eq $ItemId
     }
-    if (-not (Wait-For $isSelected)) { throw "language item $ItemId was not selected" }
+    if (-not (Wait-For $isSelected)) { throw "combo box item $ItemId was not selected" }
     $isCollapsed = {
-        $state = (Get-SettingsElement 'LanguageComboBox').GetCurrentPattern($ExpandPattern)
+        $state = (Get-SettingsElement $ComboBoxId).GetCurrentPattern($ExpandPattern)
         if ($state.Current.ExpandCollapseState -ne 'Collapsed') { $state.Collapse() }
         $state.Current.ExpandCollapseState -eq 'Collapsed'
     }
@@ -520,19 +526,19 @@ function Test-Language {
 
     Open-Settings
     Check 'no restart notice before choosing a language' (-not (Get-SettingsElement 'LanguageRestartNotice'))
-    Select-Language $otherItem
+    Select-ComboBoxItem 'LanguageComboBox' $otherItem
     Check 'choosing another language shows the restart notice' ([bool](Wait-For { Get-SettingsElement 'LanguageRestartNotice' }))
     Save-Screenshot (Get-SettingsWindow) 'language-notice'
-    Select-Language 'LanguageSystem'
+    Select-ComboBoxItem 'LanguageComboBox' 'LanguageSystem'
     Check 'choosing the launch language hides the restart notice' ([bool](Wait-For { -not (Get-SettingsElement 'LanguageRestartNotice') }))
 
-    Select-Language $otherItem
+    Select-ComboBoxItem 'LanguageComboBox' $otherItem
     Restart-App
     $expected = Get-Resource $otherCulture 'SettingsHeader.Text'
     Check 'the chosen language applies after a restart' ([bool](Wait-For { (& $header) -eq $expected })) "header is '$(& $header)'"
     Save-Screenshot (Get-SettingsWindow) 'language-applied'
 
-    Select-Language 'LanguageSystem'
+    Select-ComboBoxItem 'LanguageComboBox' 'LanguageSystem'
     Restart-App
     $expected = Get-Resource $systemCulture 'SettingsHeader.Text'
     Check 'the system language returns after a restart' ([bool](Wait-For { (& $header) -eq $expected })) "header is '$(& $header)'"
@@ -884,6 +890,99 @@ function Test-PopupSize {
     $slider.SetValue(90)
 }
 
+# Windows apps follow this mode. The taskbar and the tray icon follow SystemUsesLightTheme instead.
+function Test-AppsUseLightTheme {
+    $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+    # Windows starts in light mode, so a missing value means light.
+    return $null -eq $key.AppsUseLightTheme -or $key.AppsUseLightTheme -ne 0
+}
+
+# Rec. 709 luma from 0 to 255. Light and dark theme surfaces land far on either side of 128.
+function Get-Luma($Pixel) {
+    return 0.2126 * $Pixel.R + 0.7152 * $Pixel.G + 0.0722 * $Pixel.B
+}
+
+# The middle of the title bar, and the left padding of the content halfway down, which no card covers at any scroll position.
+# PrintWindow puts the top left corner of the window rect at 0,0.
+function Get-SettingsWindowLuma {
+    $window = Get-SettingsWindow
+    $rect = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::GetWindowRect([IntPtr]$window.Current.NativeWindowHandle, [ref]$rect)
+    $content = (Find-Id $window 'SettingsScrollViewer').Current.BoundingRectangle
+    $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+    $bitmap = Get-WindowBitmap $window
+    try {
+        return @{
+            TitleBar = Get-Luma ($bitmap.GetPixel([int](($content.Left + $content.Right) / 2 - $rect.Left), [int](($content.Top - $rect.Top) / 2)))
+            Background = Get-Luma ($bitmap.GetPixel([int]($content.Left + 12 * $dpiScale - $rect.Left), [int]($content.Top + $content.Height / 2 - $rect.Top)))
+        }
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+# Waits because the theme can land a frame after the choice. Windows draws the title bar outside XAML, so it is checked on its own.
+function Assert-SettingsTheme([string] $Name, [bool] $Light, [string] $ScreenshotName) {
+    $script:SettingsLuma = $null
+    [void](Wait-For {
+        $script:SettingsLuma = Get-SettingsWindowLuma
+        (($script:SettingsLuma.Background -ge 128) -eq $Light) -and (($script:SettingsLuma.TitleBar -ge 128) -eq $Light)
+    })
+    Save-Screenshot (Get-SettingsWindow) $ScreenshotName
+    $luma = $script:SettingsLuma
+    if (-not $luma) {
+        Check $Name $false 'the settings window could not be read'
+        return
+    }
+
+    Check $Name (($luma.Background -ge 128) -eq $Light) "background luma $([int]$luma.Background)"
+    Check "$Name, title bar included" (($luma.TitleBar -ge 128) -eq $Light) "title bar luma $([int]$luma.TitleBar)"
+}
+
+# The pixels of the acrylic check, above the text and right of the album art, averaged over both colors of the band.
+function Get-PopupLuma([string] $ScreenshotName) {
+    $path = Join-Path $OutDir "$ScreenshotName.png"
+    if (-not (Test-Path $path)) { return $null }
+
+    $bitmap = [System.Drawing.Bitmap]::new($path)
+    try {
+        $row = [int]($bitmap.Height * 0.12)
+        $left = Get-Luma ($bitmap.GetPixel([int]($bitmap.Width * 0.25), $row))
+        $right = Get-Luma ($bitmap.GetPixel([int]($bitmap.Width * 0.75), $row))
+        return ($left + $right) / 2
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+# Chooses the mode Windows is not in, so the check cannot pass by following Windows.
+function Test-Theme {
+    $systemLight = Test-AppsUseLightTheme
+    $chosenLight = -not $systemLight
+    $systemName = if ($systemLight) { 'light' } else { 'dark' }
+    $chosenName = if ($chosenLight) { 'light' } else { 'dark' }
+    $chosenItem = if ($chosenLight) { 'ThemeLight' } else { 'ThemeDark' }
+
+    Open-Settings
+    Assert-SettingsTheme "the settings window follows the $systemName Windows mode by default" $systemLight 'theme-default'
+    Select-ComboBoxItem 'ThemeComboBox' $chosenItem
+    Assert-SettingsTheme "choosing $chosenName applies to the settings window right away" $chosenLight 'theme-chosen'
+
+    $tracks = Watch-FixtureTracks 'popup-theme'
+    if ($tracks) {
+        Check 'a track change shows the popup in the chosen theme' $tracks.First.Shown
+        if ($tracks.First.Shown) {
+            $luma = Get-PopupLuma 'popup-theme'
+            Check "the popup uses the $chosenName theme" ($null -ne $luma -and ($luma -ge 128) -eq $chosenLight) "luma $luma"
+        }
+    }
+
+    Restart-App
+    Assert-SettingsTheme "the $chosenName theme stays after a restart" $chosenLight 'theme-restarted'
+    Select-ComboBoxItem 'ThemeComboBox' 'ThemeSystem'
+    Assert-SettingsTheme "choosing the system setting follows the $systemName Windows mode again" $systemLight 'theme-system'
+}
+
 function Test-DoNotDisturb {
     if (Test-DoNotDisturbOn) {
         $script:UnavailableReason = 'do not disturb is already on, and this scenario has to turn it on itself; turn it off and run again'
@@ -995,6 +1094,7 @@ $scenarios = [ordered]@{
     language = { Test-Language }
     media = { Test-Media }
     popupsize = { Test-PopupSize }
+    theme = { Test-Theme }
     dnd = { Test-DoNotDisturb }
     tray = { Test-Tray }
     storeshots = { Save-StoreScreenshots }

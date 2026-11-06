@@ -50,7 +50,7 @@ Soriseom(소리섬) 저장소의 코딩 규칙입니다. Claude Code가 읽고, 
 | Store 업로드 패키지 생성 | `pwsh -NoProfile -File tools/store/Build-StorePackage.ps1 -Version <X.Y.Z> -IdentityName <이름> -Publisher <CN=...> -PublisherDisplayName <표시 이름> -OutDir <폴더>` |
 | Store 패키지 스크립트 검사 | `pwsh -NoProfile -File tools/store/Test-StorePackage.ps1` |
 | 로컬 MSIX 생성(Debug, 서명 없음) | `dotnet build src/Soriseom.App -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false` |
-| 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Configuration Release] [-Scenario launch,relaunch,startup,language,media,popupsize,dnd,tray]` |
+| 앱 실행 확인(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 [-Configuration Release] [-Scenario launch,relaunch,startup,language,media,popupsize,theme,dnd,tray]` |
 | Store 스크린샷 생성(Claude만) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots -OutDir <폴더>` |
 | 재로그인 직후 상태 확인(읽기 전용) | `pwsh -NoProfile -File tools/smoke/Smoke.ps1 -AfterSignIn` |
 
