@@ -51,8 +51,11 @@ using System.Text;
 using System.Threading;
 public static class SmokeNative {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref POINT point);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
@@ -903,18 +906,25 @@ function Get-Luma($Pixel) {
 }
 
 # The middle of the title bar, and the left padding of the content halfway down, which no card covers at any scroll position.
-# PrintWindow puts the top left corner of the window rect at 0,0.
+# The default title bar is the non-client area above the client area. The scroll viewer is not used for this,
+# because UI Automation moves its bounds with the scroll offset. PrintWindow puts the top left corner of the window rect at 0,0.
 function Get-SettingsWindowLuma {
     $window = Get-SettingsWindow
+    $handle = [IntPtr]$window.Current.NativeWindowHandle
     $rect = [SmokeNative+RECT]::new()
-    [void][SmokeNative]::GetWindowRect([IntPtr]$window.Current.NativeWindowHandle, [ref]$rect)
-    $content = (Find-Id $window 'SettingsScrollViewer').Current.BoundingRectangle
+    [void][SmokeNative]::GetWindowRect($handle, [ref]$rect)
+    $client = [SmokeNative+RECT]::new()
+    [void][SmokeNative]::GetClientRect($handle, [ref]$client)
+    $origin = [SmokeNative+POINT]::new()
+    [void][SmokeNative]::ClientToScreen($handle, [ref]$origin)
+    $left = $origin.X - $rect.Left
+    $top = $origin.Y - $rect.Top
     $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
     $bitmap = Get-WindowBitmap $window
     try {
         return @{
-            TitleBar = Get-Luma ($bitmap.GetPixel([int](($content.Left + $content.Right) / 2 - $rect.Left), [int](($content.Top - $rect.Top) / 2)))
-            Background = Get-Luma ($bitmap.GetPixel([int]($content.Left + 12 * $dpiScale - $rect.Left), [int]($content.Top + $content.Height / 2 - $rect.Top)))
+            TitleBar = Get-Luma ($bitmap.GetPixel([int]($left + $client.Right / 2), [int]($top / 2)))
+            Background = Get-Luma ($bitmap.GetPixel([int]($left + 12 * $dpiScale), [int]($top + $client.Bottom / 2)))
         }
     } finally {
         $bitmap.Dispose()

@@ -9,7 +9,7 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <ScrollViewer x:Name="ContentRoot" AutomationProperties.AutomationId="SettingsScrollViewer">
+    <ScrollViewer x:Name="ContentRoot">
         <StackPanel Padding="24" Spacing="8">
             <StackPanel.Resources>
                 <Style x:Key="SettingsCardStyle" TargetType="Border">
