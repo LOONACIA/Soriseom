@@ -66,6 +66,7 @@ public static class SmokeNative {
     [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr desktop);
     [DllImport("user32.dll")] public static extern bool SystemParametersInfoW(uint action, uint param, out RECT rect, uint winIni);
     [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);
 }
 
@@ -439,13 +440,21 @@ function Save-WindowFrameScreenshot($Window, [string] $Name) {
     # DWMWA_EXTENDED_FRAME_BOUNDS
     $result = [SmokeNative]::DwmGetWindowAttribute([IntPtr]$Window.Current.NativeWindowHandle, 9, [ref]$rect, 16)
     if ($result -ne 0) { throw "DwmGetWindowAttribute failed: $result" }
-    $width = $rect.Right - $rect.Left
-    $height = $rect.Bottom - $rect.Top
-    $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+    Save-ScreenArea $rect.Left $rect.Top ($rect.Right - $rect.Left) ($rect.Bottom - $rect.Top) $Name
+}
+
+# The whole primary monitor, taskbar included. Its top left corner is the screen origin.
+function Save-PrimaryScreenScreenshot([string] $Name) {
+    # SM_CXSCREEN, SM_CYSCREEN
+    Save-ScreenArea 0 0 ([SmokeNative]::GetSystemMetrics(0)) ([SmokeNative]::GetSystemMetrics(1)) $Name
+}
+
+function Save-ScreenArea([int] $Left, [int] $Top, [int] $Width, [int] $Height, [string] $Name) {
+    $bitmap = [System.Drawing.Bitmap]::new($Width, $Height)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $path = Join-Path $OutDir "$Name.png"
     try {
-        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        $graphics.CopyFromScreen($Left, $Top, 0, 0, $bitmap.Size)
         $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally {
         $graphics.Dispose()
@@ -613,7 +622,7 @@ function Start-StoreBackdrop {
     return Start-BackdropProcess $workArea.Left $workArea.Top ($workArea.Right - $workArea.Left) ($workArea.Bottom - $workArea.Top) -Neutral
 }
 
-function Start-BackdropProcess([int] $X, [int] $Y, [int] $Width, [int] $Height, [switch] $Neutral) {
+function Start-BackdropProcess([int] $X, [int] $Y, [int] $Width, [int] $Height, [switch] $Neutral, [string] $ImagePath) {
     $readyPath = Join-Path $OutDir 'backdrop-fixture.txt'
     Remove-Item $readyPath -Force -ErrorAction SilentlyContinue
     $fixturePath = Join-Path $PSScriptRoot 'BackdropFixture.ps1'
@@ -621,6 +630,7 @@ function Start-BackdropProcess([int] $X, [int] $Y, [int] $Width, [int] $Height, 
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
         '-X', $X, '-Y', $Y, '-Width', $Width, '-Height', $Height, '-ReadyPath', "`"$readyPath`"")
     if ($Neutral) { $arguments += '-Neutral' }
+    if ($ImagePath) { $arguments += '-ImagePath', "`"$ImagePath`"" }
     $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList $arguments
     if (-not (Wait-For { Test-Path $readyPath })) {
         Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue
@@ -780,6 +790,41 @@ function Test-Media {
     }
 }
 
+# Plays one demo track, runs Capture with its popup while the popup still shows that track, and returns
+# whether the popup went away afterwards. Other titles are never read out or captured.
+function Show-StoreDemoTrack([string] $Culture, [string] $Label, [string] $Title, [string] $Artist, [string] $ThumbnailPath, [string] $StatusPath, [scriptblock] $Capture) {
+    $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
+    $fixture = $null
+    try {
+        # Repeating the title prevents a second popup even if stopping the fixture is delayed.
+        $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
+            '-AppId', $StoreFixtureAppId, '-FirstTitle', "`"$Title`"", '-SecondTitle', "`"$Title`"",
+            '-Artist', "`"$Artist`"", '-ThumbnailPath', "`"$ThumbnailPath`"", '-StatusPath', "`"$StatusPath`"")
+        $popup = Wait-For {
+            $candidate = Get-PopupWindow
+            if ($candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $Title) { $candidate }
+        } 12000
+        Check "the $Culture demo popup $Label appears" ([bool]$popup)
+        if ($popup) {
+            Start-Sleep -Milliseconds 1500
+            # A real session could replace the demo during the animation.
+            $stillDemo = try {
+                $popup = Get-PopupWindow
+                $popup -and (Find-Id $popup 'TitleText').Current.Name -ceq $Title
+            } catch { $false }
+            Check "the $Culture popup $Label still shows the demo before capture" $stillDemo
+            if ($stillDemo) { $null = & $Capture $popup }
+        }
+    } finally {
+        if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
+    }
+
+    $gone = [bool](Wait-For { -not (Get-PopupWindow) })
+    Check "the $Culture popup $Label disappears before the next capture" $gone
+    return $gone
+}
+
 function Save-StoreScreenshots {
     if (Test-DoNotDisturbOn) {
         $script:UnavailableReason = 'do not disturb is on, and the app hides popups then by design; turn it off and run again'
@@ -818,7 +863,6 @@ function Save-StoreScreenshots {
         $themes = @('ThemeLight', 'ThemeDark', 'ThemeLight')
         foreach ($language in $languages) {
             $culture = $language.Culture
-            $fixture = $null
             $backdrop = $null
             $statusPath = Join-Path $OutDir "store-$culture-fixture.txt"
             try {
@@ -839,44 +883,17 @@ function Save-StoreScreenshots {
                 $backdrop = Start-StoreBackdrop
                 # Tracks already playing when media watching starts get no popup.
                 Start-Sleep -Seconds 2
-                $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
                 $popupGone = $true
                 foreach ($n in 1..3) {
                     # Do not let the next track replace a popup that failed to disappear.
                     if (-not $popupGone) { break }
                     Select-ComboBoxItem 'ThemeComboBox' $themes[$n - 1]
-                    $title = $language.Titles[$n - 1]
-                    $fixture = $null
-                    try {
-                        # Repeating the title prevents a second popup even if stopping the fixture is delayed.
-                        $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
-                            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
-                            '-AppId', $StoreFixtureAppId, '-FirstTitle', "`"$title`"", '-SecondTitle', "`"$title`"",
-                            '-Artist', "`"$($language.Artist)`"", '-ThumbnailPath', "`"$($albumPaths[$n - 1])`"", '-StatusPath', "`"$statusPath`"")
-                        $popup = Wait-For {
-                            $candidate = Get-PopupWindow
-                            if ($candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $title) { $candidate }
-                        } 12000
-                        Check "the $culture demo popup $n appears" ([bool]$popup)
-                        if (-not $popup) { continue }
-
-                        Start-Sleep -Milliseconds 1500
-                        # A real session could replace the demo during the animation. Never print its title or capture it.
-                        $stillDemo = try {
-                            $popup = Get-PopupWindow
-                            $popup -and (Find-Id $popup 'TitleText').Current.Name -ceq $title
-                        } catch { $false }
-                        Check "the $culture popup $n still shows the demo before capture" $stillDemo
-                        if (-not $stillDemo) { continue }
-                        Save-ElementScreenshot $popup "store-material-$culture-popup-$n"
-
+                    $popupGone = Show-StoreDemoTrack $culture $n $language.Titles[$n - 1] $language.Artist $albumPaths[$n - 1] $statusPath {
+                        param($Popup)
+                        Save-ElementScreenshot $Popup "store-material-$culture-popup-$n"
                         $bounds = [SmokeNative+RECT]::new()
-                        [void][SmokeNative]::GetWindowRect([IntPtr]$popup.Current.NativeWindowHandle, [ref]$bounds)
+                        [void][SmokeNative]::GetWindowRect([IntPtr]$Popup.Current.NativeWindowHandle, [ref]$bounds)
                         Check "the $culture popup $n is 360x80 DIP" ([Math]::Abs($bounds.Right - $bounds.Left - 360 * $dpiScale) -le 2 -and [Math]::Abs($bounds.Bottom - $bounds.Top - 80 * $dpiScale) -le 2)
-                    } finally {
-                        if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
-                        $popupGone = Wait-For { -not (Get-PopupWindow) }
-                        Check "the $culture popup $n disappears before the next capture" ([bool]$popupGone)
                     }
                 }
                 if (-not $popupGone) { continue }
@@ -919,8 +936,19 @@ function Save-StoreScreenshots {
                 Check "the $culture settings window is still available for capture" ([bool]$settings)
                 if (-not $settings) { continue }
                 Save-WindowFrameScreenshot $settings "store-material-$culture-settings"
+
+                # A real desktop: a Windows wallpaper hides the user's own, the taskbar stays, and the app lives in the tray.
+                $wallpaper = Join-Path $env:WINDIR 'Web\Wallpaper\ThemeC\img28.jpg'
+                Check "the wallpaper for the $culture desktop shot exists" (Test-Path $wallpaper) $wallpaper
+                if (-not (Test-Path $wallpaper)) { continue }
+                Close-Settings
+                Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue
+                # Only the work area: a window over the whole monitor counts as full screen, which hides the popup.
+                $backdrop = Start-BackdropProcess $workArea.Left $workArea.Top ($workArea.Right - $workArea.Left) ($workArea.Bottom - $workArea.Top) -ImagePath $wallpaper
+                [void](Show-StoreDemoTrack $culture 'desktop' $language.Titles[0] $language.Artist $albumPaths[0] $statusPath {
+                    Save-PrimaryScreenScreenshot "store-material-$culture-desktop"
+                })
             } finally {
-                if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
                 if ($backdrop -and -not $backdrop.HasExited) { Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue }
                 Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
             }

@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pillow==13.0.0"]
 # ///
-"""Compose two 1920x1080 Store screenshots per language from captured PNG materials."""
+"""Compose three Store screenshots per language from captured PNG materials."""
 
 import argparse
 import os
@@ -12,95 +12,76 @@ import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 SIZE = (1920, 1080)
-AMBER = (251, 191, 36)
 WHITE = (255, 255, 255)
+BODY = (255, 255, 255, 205)
 COPY = {
     "ko-KR": {
-        "popup_title": "곡이 바뀌는 순간",
-        "popup_lines": [
-            [("창을 바꾸지 않아도", WHITE)],
-            [("제목·아티스트·앨범아트", AMBER), ("를 바로 확인하세요", WHITE)],
-        ],
-        "settings_title": ["원하는 대로", "맞추세요"],
-        "features": [
-            "표시 시간 2~10초",
-            "위치 6곳, 크기 70~100%",
-            "밝게·어둡게 테마",
-            "앱별로 켜고 끄기",
-        ],
+        "font": "noto",
+        "title_weight": "Bold",
+        "popup_title": ["곡이 바뀌면", "잠깐 알려 줍니다"],
+        "popup_body": "제목, 아티스트, 앨범아트를 몇 초 동안 보여 주고 사라집니다. 작업 중인 창의 포커스는 그대로입니다.",
+        "settings_title": ["보이는 방식은", "직접 정합니다"],
+        "settings_body": "표시 시간, 위치, 크기, 테마를 바꾸고 앱마다 팝업을 켜거나 끌 수 있습니다.",
     },
     "en-US": {
-        "popup_title": "When the track changes",
-        "popup_lines": [
-            [("See the ", WHITE), ("title, artist, and album art", AMBER)],
-            [("without switching windows", WHITE)],
-        ],
-        "settings_title": ["Make it", "yours"],
-        "features": [
-            "Show for 2 to 10 seconds",
-            "6 positions, 70% to 100% size",
-            "Light or dark theme",
-            "Turn popups on or off per app",
-        ],
+        "font": "segoe",
+        "title_weight": "Bold Display",
+        "popup_title": ["A quick note when", "the track changes"],
+        "popup_body": "Title, artist, and album art for a few seconds, then it's gone. Your current window keeps focus.",
+        "settings_title": ["You choose", "how it shows"],
+        "settings_body": "Change the display time, position, size, and theme, and turn popups on or off for each app.",
     },
 }
 
-type Line = list[tuple[str, tuple[int, int, int]]]
-
 
 def background() -> Image.Image:
-    small = Image.new("RGB", (192, 108))
-    start, end = (13, 110, 104), (30, 58, 168)
-    for y in range(108):
-        for x in range(192):
-            t = x / 192 * 0.55 + y / 108 * 0.45
-            small.putpixel((x, y), tuple(round(a + (b - a) * t) for a, b in zip(start, end)))
-    canvas = small.resize(SIZE, Image.Resampling.BICUBIC).convert("RGBA")
-    waves = Image.new("RGBA", SIZE)
-    draw = ImageDraw.Draw(waves)
-    for cx, cy, count in ((1640, 250, 7), (260, 880, 6)):
-        for i in range(count):
-            radius = 90 + i * 85
-            draw.ellipse(
-                (cx - radius, cy - radius, cx + radius, cy + radius),
-                outline=(*WHITE, max(10, 46 - i * 6)),
-                width=6,
-            )
-    canvas.alpha_composite(waves.filter(ImageFilter.GaussianBlur(1.5)))
-    return canvas
+    # Near #155488, the color the popup materials are captured on, so their acrylic tint fits.
+    top, bottom = (24, 92, 146), (18, 74, 122)
+    column = Image.new("RGB", (1, SIZE[1]))
+    for y in range(SIZE[1]):
+        t = y / SIZE[1]
+        column.putpixel((0, y), tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)))
+    return column.resize(SIZE).convert("RGBA")
 
 
-def line_width(draw: ImageDraw.ImageDraw, line: Line, font: ImageFont.FreeTypeFont) -> float:
-    return sum(draw.textlength(text, font=font) for text, _ in line)
+def load_font(path: Path, size: int, weight: str) -> ImageFont.FreeTypeFont:
+    font = ImageFont.truetype(str(path), size)
+    font.set_variation_by_name(weight)
+    return font
 
 
-def fit_font(path: Path, weight: str, lines: list[Line], size: int, width: int) -> ImageFont.FreeTypeFont:
-    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    while True:
-        font = ImageFont.truetype(str(path), size)
-        font.set_variation_by_name(weight)
-        if max(line_width(draw, line, font) for line in lines) <= width:
-            return font
-        size -= 2
+def wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
+    lines = [""]
+    for word in text.split(" "):
+        candidate = f"{lines[-1]} {word}".strip()
+        if lines[-1] and draw.textlength(candidate, font=font) > width:
+            lines.append(word)
+        else:
+            lines[-1] = candidate
+    return lines
 
 
-def draw_line(
-    canvas: Image.Image, line: Line, font: ImageFont.FreeTypeFont, x: float | None, y: int
+def draw_text(
+    canvas: Image.Image, culture: str, key: str, font_path: Path, top: int | None, width: int
 ) -> None:
-    draw = ImageDraw.Draw(canvas)
-    if x is None:
-        x = (SIZE[0] - line_width(draw, line, font)) / 2
-    text_y = y - font.getbbox("".join(text for text, _ in line))[1]
-    shadow = Image.new("RGBA", SIZE)
-    shadow_draw = ImageDraw.Draw(shadow)
-    next_x = x
-    for text, _ in line:
-        shadow_draw.text((next_x, text_y + 6), text, font=font, fill=(0, 0, 0, 120))
-        next_x += shadow_draw.textlength(text, font=font)
-    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(10)))
-    for text, color in line:
-        draw.text((x, text_y), text, font=font, fill=color)
-        x += draw.textlength(text, font=font)
+    """Draw the title and body at the left, from top or centered vertically when top is None."""
+    copy = COPY[culture]
+    # A separate layer, so the body's alpha blends with the background instead of replacing it.
+    layer = Image.new("RGBA", SIZE)
+    draw = ImageDraw.Draw(layer)
+    title_font = load_font(font_path, 76, copy["title_weight"])
+    body_font = load_font(font_path, 32, "Regular")
+    title = copy[f"{key}_title"]
+    body = wrap(draw, copy[f"{key}_body"], body_font, width)
+    y = (SIZE[1] - (len(title) * 100 + 36 + len(body) * 50)) // 2 if top is None else top
+    for line in title:
+        draw.text((140, y), line, font=title_font, fill=WHITE)
+        y += 100
+    y += 36
+    for line in body:
+        draw.text((142, y), line, font=body_font, fill=BODY)
+        y += 50
+    canvas.alpha_composite(layer)
 
 
 def rounded(image: Image.Image, radius: int) -> Image.Image:
@@ -116,49 +97,47 @@ def rounded(image: Image.Image, radius: int) -> Image.Image:
 def place(canvas: Image.Image, item: Image.Image, x: int, y: int, radius: int) -> None:
     shadow = Image.new("RGBA", SIZE)
     ImageDraw.Draw(shadow).rounded_rectangle(
-        (x, y + 18, x + item.width - 1, y + item.height - 1 + 18),
+        (x, y + 10, x + item.width - 1, y + item.height - 1 + 10),
         radius=radius,
-        fill=(0, 0, 0, 120),
+        fill=(0, 0, 0, 80),
     )
-    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(28)))
+    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(24)))
     canvas.alpha_composite(item, (x, y))
 
 
 def compose_popups(culture: str, paths: list[Path], font_path: Path) -> Image.Image:
-    copy = COPY[culture]
     canvas = background()
-    title = [(copy["popup_title"], AMBER)]
-    font = fit_font(font_path, "Black", [title], 112, 1700)
-    draw_line(canvas, title, font, None, 70)
-
-    x0, y0 = (1920 - (430 + 620)) // 2, 320
-    for path, (dx, dy) in zip(paths, ((0, 0), (430, 140), (170, 280))):
+    popups = []
+    for path in paths:
         with Image.open(path) as source:
             popup = rounded(source, source.height // 2)
-        popup = popup.resize(
-            (620, round(popup.height * 620 / popup.width)), Image.Resampling.LANCZOS
+        popups.append(
+            popup.resize((620, round(popup.height * 620 / popup.width)), Image.Resampling.LANCZOS)
         )
-        place(canvas, popup, x0 + dx, y0 + dy, popup.height // 2)
-
-    lines = copy["popup_lines"]
-    font = fit_font(font_path, "Bold", lines, 64, 1760)
-    for line, y in zip(lines, (820, 912)):
-        draw_line(canvas, line, font, None, y)
+    # Each popup covers only the empty right side of the one before it, so every title stays readable.
+    step_x, step_y = 380, 116
+    x = 1800 - 620 - step_x * (len(popups) - 1)
+    y = 500
+    for popup in popups:
+        place(canvas, popup, x, y, popup.height // 2)
+        x += step_x
+        y += step_y
+    draw_text(canvas, culture, "popup", font_path, 110, 900)
     return canvas
 
 
-def compose_settings(culture: str, path: Path, font_path: Path) -> Image.Image:
-    copy = COPY[culture]
-    canvas = background()
-    titles = [[(text, AMBER)] for text in copy["settings_title"]]
-    font = fit_font(font_path, "Black", titles, 100, 860)
-    for line, y in zip(titles, (210, 340)):
-        draw_line(canvas, line, font, 130, y)
-    features = [[("· " + text, WHITE)] for text in copy["features"]]
-    font = fit_font(font_path, "Bold", features, 46, 860)
-    for i, line in enumerate(features):
-        draw_line(canvas, line, font, 136, 540 + i * 82)
+def compose_desktop(path: Path) -> Image.Image:
+    with Image.open(path) as source:
+        desktop = source.convert("RGB")
+    if desktop.width != SIZE[0]:
+        desktop = desktop.resize(
+            (SIZE[0], round(desktop.height * SIZE[0] / desktop.width)), Image.Resampling.LANCZOS
+        )
+    return desktop
 
+
+def compose_settings(culture: str, path: Path, font_path: Path) -> Image.Image:
+    canvas = background()
     with Image.open(path) as source:
         radius = round(source.width * 8 / 720)
         settings = rounded(source, radius)
@@ -171,10 +150,26 @@ def compose_settings(culture: str, path: Path, font_path: Path) -> Image.Image:
     place(
         canvas, settings,
         1040 + (800 - settings.width) // 2,
-        60 + (960 - settings.height) // 2,
+        (SIZE[1] - settings.height) // 2,
         round(radius * scale),
     )
+    draw_text(canvas, culture, "settings", font_path, None, 720)
     return canvas
+
+
+def find_fonts() -> dict[str, Path] | None:
+    noto = [Path(r"C:\Windows\Fonts\NotoSansKR-VF.ttf")]
+    if local_app_data := os.environ.get("LOCALAPPDATA"):
+        noto.append(Path(local_app_data) / "Microsoft/Windows/Fonts/NotoSansKR-VF.ttf")
+    candidates = {"noto": noto, "segoe": [Path(r"C:\Windows\Fonts\SegUIVar.ttf")]}
+    fonts = {}
+    for name, paths in candidates.items():
+        found = next((path for path in paths if path.is_file()), None)
+        if found is None:
+            print(f"Font not found: {' or '.join(str(path) for path in paths)}", file=sys.stderr)
+            return None
+        fonts[name] = found
+    return fonts
 
 
 def main() -> int:
@@ -182,20 +177,15 @@ def main() -> int:
     parser.add_argument("folder", type=Path, help="Folder containing materials and receiving screenshots.")
     args = parser.parse_args()
 
-    font_paths = [Path(r"C:\Windows\Fonts\NotoSansKR-VF.ttf")]
-    if local_app_data := os.environ.get("LOCALAPPDATA"):
-        font_paths.append(Path(local_app_data) / "Microsoft/Windows/Fonts/NotoSansKR-VF.ttf")
-    font_path = next((path for path in font_paths if path.is_file()), None)
-    if font_path is None:
-        print("NotoSansKR-VF.ttf was not found in C:\\Windows\\Fonts or "
-              "%LOCALAPPDATA%\\Microsoft\\Windows\\Fonts.", file=sys.stderr)
+    fonts = find_fonts()
+    if fonts is None:
         return 1
 
     skipped = False
     for culture in COPY:
         paths = [
             args.folder / f"store-material-{culture}-{name}.png"
-            for name in ("popup-1", "popup-2", "popup-3", "settings")
+            for name in ("popup-1", "popup-2", "popup-3", "desktop", "settings")
         ]
         missing = [path for path in paths if not path.is_file()]
         if missing:
@@ -203,9 +193,11 @@ def main() -> int:
                 print(f"Missing: {path}", file=sys.stderr)
             skipped = True
             continue
+        font_path = fonts[COPY[culture]["font"]]
         for number, screenshot in enumerate((
             compose_popups(culture, paths[:3], font_path),
-            compose_settings(culture, paths[3], font_path),
+            compose_desktop(paths[3]),
+            compose_settings(culture, paths[4], font_path),
         ), start=1):
             path = args.folder / f"store-{culture}-{number}.png"
             screenshot.convert("RGB").save(path, format="PNG")
