@@ -1,4 +1,4 @@
-# Shows a red and blue band behind the popup, so the smoke test can tell acrylic from a solid color.
+# Shows a red/blue test band, or the Store background's middle color (#155488) to blend popup acrylic and edges.
 # Runs in its own process because a form needs a message loop, and the smoke script is busy polling.
 param(
     [int] $X,
@@ -41,20 +41,8 @@ $form.ShowInTaskbar = $false
 $form.StartPosition = 'Manual'
 $form.Bounds = New-Object System.Drawing.Rectangle $X, $Y, $Width, $Height
 if ($Neutral) {
-    $bitmap = [System.Drawing.Bitmap]::new($Width, $Height)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $brush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
-        [System.Drawing.Rectangle]::new(0, 0, $Width, $Height),
-        [System.Drawing.ColorTranslator]::FromHtml('#3B6E8F'),
-        [System.Drawing.ColorTranslator]::FromHtml('#274B6D'),
-        [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
-    try {
-        $graphics.FillRectangle($brush, 0, 0, $Width, $Height)
-        $form.BackgroundImage = $bitmap
-    } finally {
-        $brush.Dispose()
-        $graphics.Dispose()
-    }
+    # The Store composite's middle color makes the popup acrylic and edges blend with its background.
+    $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml('#155488')
 } else {
     $form.BackColor = [System.Drawing.Color]::Red
     $right = New-Object System.Windows.Forms.Panel
@@ -73,5 +61,4 @@ try {
     [System.Windows.Forms.Application]::Run($form)
 } finally {
     $form.Dispose()
-    if ($Neutral) { $bitmap.Dispose() }
 }

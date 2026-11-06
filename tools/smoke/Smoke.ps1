@@ -17,7 +17,7 @@
 
 .PARAMETER Scenario
     Comma-separated subset of: launch, relaunch, startup, language, media, popupsize, theme, dnd, tray, storeshots.
-    storeshots generates Store screenshots and is not included in the default list.
+    storeshots captures the materials for the Store screenshots and is not included in the default list.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Debug; Release is the trimmed build users receive.
@@ -54,6 +54,7 @@ public static class SmokeNative {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out RECT value, int size);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out RECT rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref POINT point);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
@@ -432,24 +433,25 @@ function Save-ElementScreenshot($Element, [string] $Name) {
     Write-Line "screenshot $path"
 }
 
-# PrintWindow cannot capture a transparent popup together with its backdrop.
-function Save-WorkAreaScreenshot([string] $Name) {
-    $workArea = [SmokeNative+RECT]::new()
-    [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
-    $width = $workArea.Right - $workArea.Left
-    $height = $workArea.Bottom - $workArea.Top
+# GetWindowRect and UI Automation bounds include invisible resize borders; DWM returns the visible frame.
+function Save-WindowFrameScreenshot($Window, [string] $Name) {
+    $rect = [SmokeNative+RECT]::new()
+    # DWMWA_EXTENDED_FRAME_BOUNDS
+    $result = [SmokeNative]::DwmGetWindowAttribute([IntPtr]$Window.Current.NativeWindowHandle, 9, [ref]$rect, 16)
+    if ($result -ne 0) { throw "DwmGetWindowAttribute failed: $result" }
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
     $bitmap = [System.Drawing.Bitmap]::new($width, $height)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $path = Join-Path $OutDir "$Name.png"
     try {
-        $graphics.CopyFromScreen($workArea.Left, $workArea.Top, 0, 0, $bitmap.Size)
+        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
         $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally {
         $graphics.Dispose()
         $bitmap.Dispose()
     }
     Write-Line "screenshot $path"
-    Check "$Name is between 1366x768 and 3840x2160 pixels" ($width -ge 1366 -and $height -ge 768 -and $width -le 3840 -and $height -le 2160) "${width}x${height}"
 }
 
 function Test-Launch {
@@ -785,28 +787,35 @@ function Save-StoreScreenshots {
         return
     }
 
-    $albumPath = Join-Path $OutDir 'store-album-art.png'
+    $albumPaths = @(1..3 | ForEach-Object { Join-Path $OutDir "store-album-art-$_.png" })
     try {
         # Original artwork without another company's album art or trademarks.
-        $bitmap = [System.Drawing.Bitmap]::new(512, 512)
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $brush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
-            [System.Drawing.Rectangle]::new(0, 0, 512, 512),
-            [System.Drawing.ColorTranslator]::FromHtml('#76C7C0'),
-            [System.Drawing.ColorTranslator]::FromHtml('#274B6D'),
-            [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
-        try {
-            $graphics.FillRectangle($brush, 0, 0, 512, 512)
-            $bitmap.Save($albumPath, [System.Drawing.Imaging.ImageFormat]::Png)
-        } finally {
-            $brush.Dispose()
-            $graphics.Dispose()
-            $bitmap.Dispose()
+        $colors = @(
+            @('#76C7C0', '#274B6D'),
+            @('#F59E0B', '#BE185D'),
+            @('#A78BFA', '#1E3A8A'))
+        for ($i = 0; $i -lt 3; $i++) {
+            $bitmap = [System.Drawing.Bitmap]::new(512, 512)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $brush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
+                [System.Drawing.Rectangle]::new(0, 0, 512, 512),
+                [System.Drawing.ColorTranslator]::FromHtml($colors[$i][0]),
+                [System.Drawing.ColorTranslator]::FromHtml($colors[$i][1]),
+                [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
+            try {
+                $graphics.FillRectangle($brush, 0, 0, 512, 512)
+                $bitmap.Save($albumPaths[$i], [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+                $brush.Dispose()
+                $graphics.Dispose()
+                $bitmap.Dispose()
+            }
         }
 
         $languages = @(
-            @{ Culture = 'ko-KR'; FirstTitle = '파도 소리'; SecondTitle = '섬의 아침'; Artist = '소리섬 데모' },
-            @{ Culture = 'en-US'; FirstTitle = 'Ocean Waves'; SecondTitle = 'Island Morning'; Artist = 'Soriseom Demo' })
+            @{ Culture = 'ko-KR'; Titles = @('파도 소리', '섬의 아침', '노을 산책'); Artist = '소리섬 데모' },
+            @{ Culture = 'en-US'; Titles = @('Ocean Waves', 'Island Morning', 'Sunset Walk'); Artist = 'Soriseom Demo' })
+        $themes = @('ThemeLight', 'ThemeDark', 'ThemeLight')
         foreach ($language in $languages) {
             $culture = $language.Culture
             $fixture = $null
@@ -816,36 +825,63 @@ function Save-StoreScreenshots {
                 Stop-App
                 [void](Invoke-LanguageOverride $culture)
                 Open-Settings
+                # Capture the largest available popup material.
+                (Get-SettingsElement 'PopupSizeSlider').GetCurrentPattern($RangeValuePattern).SetValue(100)
+                $workArea = [SmokeNative+RECT]::new()
+                [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
+                $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+                # Keep settings away from the top-center acrylic popup so its colors cannot bleed through.
+                $settings = Get-SettingsWindow
+                Check "the $culture settings window is available before popup capture" ([bool]$settings)
+                if (-not $settings) { continue }
+                [void][SmokeNative]::SetWindowPos([IntPtr]$settings.Current.NativeWindowHandle, [IntPtr]::Zero,
+                    [int]($workArea.Left + 40 * $dpiScale), [int]($workArea.Top + 200 * $dpiScale), 0, 0, (0x1 -bor 0x4 -bor 0x10))
                 $backdrop = Start-StoreBackdrop
                 # Tracks already playing when media watching starts get no popup.
                 Start-Sleep -Seconds 2
                 $fixturePath = Join-Path $PSScriptRoot 'MediaFixture.ps1'
-                $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
-                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
-                    '-AppId', $StoreFixtureAppId, '-FirstTitle', "`"$($language.FirstTitle)`"", '-SecondTitle', "`"$($language.SecondTitle)`"",
-                    '-Artist', "`"$($language.Artist)`"", '-ThumbnailPath', "`"$albumPath`"", '-StatusPath', "`"$statusPath`"")
-                $popup = Wait-For {
-                    $candidate = Get-PopupWindow
-                    if ($candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $language.FirstTitle) { $candidate }
-                } 12000
-                Check "the $culture demo popup appears" ([bool]$popup)
-                if (-not $popup) { continue }
+                $popupGone = $true
+                foreach ($n in 1..3) {
+                    # Do not let the next track replace a popup that failed to disappear.
+                    if (-not $popupGone) { break }
+                    Select-ComboBoxItem 'ThemeComboBox' $themes[$n - 1]
+                    $title = $language.Titles[$n - 1]
+                    $fixture = $null
+                    try {
+                        # Repeating the title prevents a second popup even if stopping the fixture is delayed.
+                        $fixture = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
+                            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$fixturePath`"",
+                            '-AppId', $StoreFixtureAppId, '-FirstTitle', "`"$title`"", '-SecondTitle', "`"$title`"",
+                            '-Artist', "`"$($language.Artist)`"", '-ThumbnailPath', "`"$($albumPaths[$n - 1])`"", '-StatusPath', "`"$statusPath`"")
+                        $popup = Wait-For {
+                            $candidate = Get-PopupWindow
+                            if ($candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $title) { $candidate }
+                        } 12000
+                        Check "the $culture demo popup $n appears" ([bool]$popup)
+                        if (-not $popup) { continue }
 
-                Start-Sleep -Milliseconds 1500
-                # A real session could replace the demo during the animation. Never print its title or capture it.
-                $stillDemo = try {
-                    $candidate = Get-PopupWindow
-                    $candidate -and (Find-Id $candidate 'TitleText').Current.Name -ceq $language.FirstTitle
-                } catch { $false }
-                Check "the $culture popup still shows the demo before capture" $stillDemo
-                if (-not $stillDemo) { continue }
-                Save-WorkAreaScreenshot "store-$culture-popup"
+                        Start-Sleep -Milliseconds 1500
+                        # A real session could replace the demo during the animation. Never print its title or capture it.
+                        $stillDemo = try {
+                            $popup = Get-PopupWindow
+                            $popup -and (Find-Id $popup 'TitleText').Current.Name -ceq $title
+                        } catch { $false }
+                        Check "the $culture popup $n still shows the demo before capture" $stillDemo
+                        if (-not $stillDemo) { continue }
+                        Save-ElementScreenshot $popup "store-material-$culture-popup-$n"
 
-                if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force }
-                $popupGone = Wait-For { -not (Get-PopupWindow) }
-                Check "the $culture popup disappears before the settings capture" ([bool]$popupGone)
+                        $bounds = [SmokeNative+RECT]::new()
+                        [void][SmokeNative]::GetWindowRect([IntPtr]$popup.Current.NativeWindowHandle, [ref]$bounds)
+                        Check "the $culture popup $n is 360x80 DIP" ([Math]::Abs($bounds.Right - $bounds.Left - 360 * $dpiScale) -le 2 -and [Math]::Abs($bounds.Bottom - $bounds.Top - 80 * $dpiScale) -le 2)
+                    } finally {
+                        if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
+                        $popupGone = Wait-For { -not (Get-PopupWindow) }
+                        Check "the $culture popup $n disappears before the next capture" ([bool]$popupGone)
+                    }
+                }
                 if (-not $popupGone) { continue }
 
+                Select-ComboBoxItem 'ThemeComboBox' 'ThemeLight'
                 $row = Wait-For { Get-SettingsElement $StoreFixtureAppId }
                 Check "the $culture settings show the demo app row" ([bool]$row)
                 if (-not $row) { continue }
@@ -854,9 +890,6 @@ function Save-StoreScreenshots {
                 Check "the $culture settings window is available for capture" ([bool]$settings)
                 if (-not $settings) { continue }
 
-                $workArea = [SmokeNative+RECT]::new()
-                [void][SmokeNative]::SystemParametersInfoW(0x30, 0, [ref]$workArea, 0)
-                $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
                 $width = [int](720 * $dpiScale)
                 $height = [int][Math]::Min(1040 * $dpiScale, $workArea.Bottom - $workArea.Top - 80 * $dpiScale)
                 $x = [int](($workArea.Left + $workArea.Right - $width) / 2)
@@ -866,7 +899,26 @@ function Save-StoreScreenshots {
                 Check "the $culture settings window is centered above the backdrop" $positioned
                 if (-not $positioned) { continue }
                 Start-Sleep -Milliseconds 500
-                Save-WorkAreaScreenshot "store-$culture-settings"
+                # Fit the visible frame to the last card instead of leaving empty space below it.
+                $targetBottom = $row.Current.BoundingRectangle.Bottom + 41 * $dpiScale # Card padding 16 + border 1 + page padding 24.
+                $frame = [SmokeNative+RECT]::new()
+                $handle = [IntPtr]$settings.Current.NativeWindowHandle
+                $result = [SmokeNative]::DwmGetWindowAttribute($handle, 9, [ref]$frame, 16)
+                if ($result -ne 0) { throw "DwmGetWindowAttribute failed: $result" }
+                if ($frame.Bottom -gt $targetBottom) {
+                    $rect = [SmokeNative+RECT]::new()
+                    [void][SmokeNative]::GetWindowRect($handle, [ref]$rect)
+                    $height = [int]($rect.Bottom - $rect.Top - ($frame.Bottom - $targetBottom))
+                    $resized = [SmokeNative]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, ($rect.Right - $rect.Left), $height, (0x2 -bor 0x4 -bor 0x10))
+                    Check "the $culture settings window fits its content" $resized
+                    if (-not $resized) { continue }
+                    Start-Sleep -Milliseconds 500
+                }
+
+                $settings = Get-SettingsWindow
+                Check "the $culture settings window is still available for capture" ([bool]$settings)
+                if (-not $settings) { continue }
+                Save-WindowFrameScreenshot $settings "store-material-$culture-settings"
             } finally {
                 if ($fixture -and -not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue }
                 if ($backdrop -and -not $backdrop.HasExited) { Stop-Process -Id $backdrop.Id -Force -ErrorAction SilentlyContinue }
@@ -874,7 +926,7 @@ function Save-StoreScreenshots {
             }
         }
     } finally {
-        Remove-Item -LiteralPath $albumPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $albumPaths -Force -ErrorAction SilentlyContinue
     }
 }
 

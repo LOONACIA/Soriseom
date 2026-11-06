@@ -75,12 +75,12 @@ IARC 설문은 첫 질문에서 고른 앱 분류에 따라 문항이 달라지�
 
 ## 스크린샷
 
-언어마다 PNG 두 장을 올립니다. Claude가 `tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots`로 만들고, 다른 창이나 개인 정보가 없는지 확인합니다(ADR-009). 파일과 캡션은 다음과 같습니다.
+언어마다 1920x1080 PNG 두 장을 올립니다. Claude가 `tools/smoke/Smoke.ps1 -Configuration Release -Scenario storeshots -OutDir <폴더>`로 팝업과 설정 창을 찍고, `uv run tools/store/compose_screenshots.py <폴더>`로 배경과 문구를 합성한 뒤, 다른 창이나 개인 정보가 없는지 확인합니다(ADR-009). 이미지 안의 문구는 합성 스크립트에 있습니다. Microsoft 권장 사항은 스크린샷에 홍보 문구를 넣지 않는 것이지만, 앱이 작은 팝업이라 문구 없이는 기능이 드러나지 않아 넣기로 했습니다(2026-11-06 사용자 결정). 파일과 캡션은 다음과 같습니다.
 
 | 파일 | ko-KR 캡션 | en-US 캡션 |
 |---|---|---|
-| `store-<언어>-popup.png` | 곡이 바뀌면 제목, 아티스트, 앨범아트를 잠깐 표시합니다. | Briefly shows the title, artist, and album art when the track changes. |
-| `store-<언어>-settings.png` | 표시 시간, 위치, 크기와 앱별 표시 여부를 설정합니다. | Choose the display time, position, size, and which apps can show popups. |
+| `store-<언어>-1.png` | 곡이 바뀌면 제목, 아티스트, 앨범아트를 잠깐 표시합니다. | Briefly shows the title, artist, and album art when the track changes. |
+| `store-<언어>-2.png` | 표시 시간, 위치, 크기, 테마와 앱별 표시 여부를 설정합니다. | Choose the display time, position, size, theme, and which apps can show popups. |
 
 ## ko-KR
 
