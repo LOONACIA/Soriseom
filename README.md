@@ -1,5 +1,7 @@
 # Soriseom (소리섬)
 
+![Soriseom popup showing the title and artist at the top of the desktop](docs/images/readme-banner.jpg)
+
 [한국어](#한국어) | [English](#english)
 
 ## 한국어
