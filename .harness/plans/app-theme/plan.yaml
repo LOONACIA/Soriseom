@@ -393,3 +393,77 @@ steps:
       - 'git grep -q "theme = { Test-Theme }" -- tools/smoke/Smoke.ps1'
       - 'git grep -q "Select-ComboBoxItem .LanguageComboBox. .LanguageSystem." -- tools/smoke/Smoke.ps1'
       - 'git grep -q "popupsize,theme,dnd,tray" -- CLAUDE.md'
+
+  - id: s4-settings-luma-client-area
+    title: read the settings window theme from the client area
+    type: fix
+    scope: tools
+    description: |
+      먼저 읽을 파일: CLAUDE.md("명령어"의 "주의"), docs/ADR.md(ADR-009), `tools/smoke/Smoke.ps1`(`SmokeNative` 정의, `Get-WindowBitmap`, `Wait-For`, theme 시나리오의 `Get-SettingsWindowLuma`, `Assert-SettingsTheme`), `src/Soriseom.App/SettingsWindow.xaml`.
+
+      문제: theme 시나리오의 `Get-SettingsWindowLuma`는 `SettingsScrollViewer`의 UI Automation `BoundingRectangle`로 제목 표시줄과 배경 위치를 정한다.
+      그런데 설정 창이 스크롤되어 있으면(media 시나리오가 앱 목록 행을 `ScrollIntoView`한 뒤) 이 사각형이 스크롤 오프셋만큼 위로 밀려 창 바깥으로 나간다.
+      실측: 창 top 130에서 사각형 top 47이나 -58, 높이 715나 820. 그래서 제목 표시줄 y가 음수가 되어 `GetPixel`이 매번 예외를 던지고, 전체 스모크에서 재시작 전 두 검사가 "the settings window could not be read"로 실패한다.
+      목표: 스크롤 위치와 상관없는 창의 클라이언트 영역으로 위치를 정한다. 기본 제목 표시줄은 클라이언트 영역 위의 비클라이언트 영역이다.
+      실측: 클라이언트 원점이 스크롤하지 않은 ScrollViewer의 top과 같고(창 top + 31px), 이 방식으로 밝게 243/194~220, 어둡게 32를 읽었다.
+
+      ## 1. `tools/smoke/Smoke.ps1`: `SmokeNative`
+      - `RECT` 구조체 줄 바로 다음에 `[StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }`를 추가한다.
+      - `GetWindowRect` 줄 바로 다음에 두 줄을 추가한다.
+      ```csharp
+          [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out RECT rect);
+          [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref POINT point);
+      ```
+
+      ## 2. `tools/smoke/Smoke.ps1`: `Get-SettingsWindowLuma`
+      함수와 그 위의 주석 두 줄을 아래로 그대로 바꾼다.
+      ```powershell
+      # The middle of the title bar, and the left padding of the content halfway down, which no card covers at any scroll position.
+      # The default title bar is the non-client area above the client area. The scroll viewer is not used for this,
+      # because UI Automation moves its bounds with the scroll offset. PrintWindow puts the top left corner of the window rect at 0,0.
+      function Get-SettingsWindowLuma {
+          $window = Get-SettingsWindow
+          $handle = [IntPtr]$window.Current.NativeWindowHandle
+          $rect = [SmokeNative+RECT]::new()
+          [void][SmokeNative]::GetWindowRect($handle, [ref]$rect)
+          $client = [SmokeNative+RECT]::new()
+          [void][SmokeNative]::GetClientRect($handle, [ref]$client)
+          $origin = [SmokeNative+POINT]::new()
+          [void][SmokeNative]::ClientToScreen($handle, [ref]$origin)
+          $left = $origin.X - $rect.Left
+          $top = $origin.Y - $rect.Top
+          $dpiScale = [SmokeNative]::GetDpiForSystem() / 96
+          $bitmap = Get-WindowBitmap $window
+          try {
+              return @{
+                  TitleBar = Get-Luma ($bitmap.GetPixel([int]($left + $client.Right / 2), [int]($top / 2)))
+                  Background = Get-Luma ($bitmap.GetPixel([int]($left + 12 * $dpiScale), [int]($top + $client.Bottom / 2)))
+              }
+          } finally {
+              $bitmap.Dispose()
+          }
+      }
+      ```
+      - 이 함수 안에서 `$value`, `$watch`, `$Condition`, `$TimeoutMs`라는 이름을 쓰지 마라. 이유: `Wait-For`의 스크립트 블록 안에서 불리고, PowerShell 변수는 대소문자를 구분하지 않는 동적 스코프라 `Wait-For`의 변수와 섞인다.
+      - `Assert-SettingsTheme`, `Get-PopupLuma`, `Test-Theme`, 128 경계값은 고치지 마라. 이유: 문제는 위치 계산뿐이고 나머지는 전체 스모크에서 통과했다.
+
+      ## 3. `src/Soriseom.App/SettingsWindow.xaml`
+      루트 `ScrollViewer`에서 `AutomationProperties.AutomationId="SettingsScrollViewer"`만 지운다. `x:Name="ContentRoot"`는 남긴다.
+      이유: 이 ID는 스모크가 위치를 찾으려고 붙인 것인데 위 변경으로 쓰는 곳이 없어진다. `ContentRoot`는 앱 테마를 적용하는 데 쓴다.
+
+      ## 하지 말 것
+      - 다른 시나리오, `Get-WindowBitmap`, `Save-Screenshot`를 고치지 마라. 설정 창을 맨 위로 스크롤하는 코드를 넣지 마라. 이유: 클라이언트 영역 기준이면 스크롤 위치와 상관없다.
+      - Core, 테스트, 다른 App 파일, `docs/`, CLAUDE.md를 고치지 마라. NuGet 패키지를 추가하지 마라.
+      - 앱과 스모크 스크립트를 실행하지 마라(CLAUDE.md "주의"). 스모크는 계획을 마무리할 때 Claude가 돌린다.
+    expected_files:
+      - tools/smoke/Smoke.ps1
+      - src/Soriseom.App/SettingsWindow.xaml
+    ac:
+      - 'dotnet build Soriseom.slnx -p:Platform=x64'
+      - 'dotnet test --project tests/Soriseom.Core.Tests'
+      - 'dotnet format Soriseom.slnx --verify-no-changes'
+      - 'pwsh -NoProfile -Command "Get-Command -Syntax ./tools/smoke/Smoke.ps1"'
+      - 'git grep -q "public static extern bool ClientToScreen" -- tools/smoke/Smoke.ps1'
+      - 'git grep -q "SmokeNative+POINT" -- tools/smoke/Smoke.ps1'
+      - 'uv run --no-project python -c "import pathlib, sys; sys.exit(any(\"SettingsScrollViewer\" in pathlib.Path(p).read_text(encoding=\"utf-8\") for p in [\"tools/smoke/Smoke.ps1\", \"src/Soriseom.App/SettingsWindow.xaml\"]))"'
+      - 'dotnet build src/Soriseom.App -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true -p:AppxPackageSigningEnabled=false'
