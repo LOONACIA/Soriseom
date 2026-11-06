@@ -94,10 +94,10 @@
 사용자:
 
 - [x] Partner Center에서 앱 이름 'Soriseom'과 '소리섬' 예약
-- [ ] 패키지 식별 정보 3개를 GitHub Secrets에 등록([최초 제출 순서](store-listing.md#최초-제출-순서))
-- [ ] Store 최초 제출을 Partner Center에서 직접 진행
-- [ ] 자동 제출용 Entra ID 앱을 만들고 자격 증명을 GitHub Secrets에 등록(Secrets 5개는 등록돼 있고, 첫 태그 제출 때 실제 인증을 확인)
-- [ ] Store 스크린샷 업로드
+- [x] 패키지 식별 정보 3개를 GitHub Secrets에 등록([최초 제출 순서](store-listing.md#최초-제출-순서))
+- [x] Store 최초 제출을 Partner Center에서 직접 진행
+- [x] 자동 제출용 Entra ID 앱을 만들고 자격 증명을 GitHub Secrets에 등록(2026-11-06 v1.0.1 태그 제출에서 인증 확인)
+- [x] Store 스크린샷 업로드
 
 Claude:
 
